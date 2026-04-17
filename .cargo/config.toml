@@ -1,2 +1,0 @@
-[patch."https://github.com/elle-lisp/elle"]
-elle-plugin = { path = "../w2/elle-plugin" }
