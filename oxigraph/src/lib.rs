@@ -1,6 +1,6 @@
 //! Elle oxigraph plugin — RDF quad storage + SPARQL via the `oxigraph` crate.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 use oxigraph::io::{RdfFormat, RdfSerializer};
 use oxigraph::model::{
@@ -196,7 +196,7 @@ fn oxigraph_err(prim: &str, e: impl std::fmt::Display) -> ElleResult {
 /// Extract `Store` from args[0], or return a type-error.
 fn get_store<'a>(args: *const ElleValue, nargs: usize, prim: &str) -> Result<&'a Store, ElleResult> {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     a.get_external::<Store>(v, "oxigraph/store").ok_or_else(|| {
         a.err("type-error", &format!("{}: expected oxigraph/store, got {}", prim, a.type_name(v)))
     })
@@ -216,7 +216,7 @@ extern "C" fn prim_store_new(_args: *const ElleValue, _nargs: usize) -> ElleResu
 
 extern "C" fn prim_store_open(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let path = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("oxigraph/store-open: expected string path, got {}", a.type_name(v))),
@@ -234,7 +234,7 @@ extern "C" fn prim_store_open(args: *const ElleValue, nargs: usize) -> ElleResul
 
 extern "C" fn prim_iri(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let s = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("oxigraph/iri: expected string, got {}", a.type_name(v))),
@@ -247,7 +247,7 @@ extern "C" fn prim_iri(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_literal(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v0 = a.arg(args, nargs, 0);
+    let v0 = unsafe { a.arg(args, nargs, 0) };
     let value = match a.get_string(v0) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("oxigraph/literal: expected string value, got {}", a.type_name(v0))),
@@ -257,12 +257,12 @@ extern "C" fn prim_literal(args: *const ElleValue, nargs: usize) -> ElleResult {
         return a.ok(a.array(&[a.keyword("literal"), a.string(&value)]));
     }
 
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let tag_key = match a.get_keyword_name(v1) {
         Some(k) => k.to_string(),
         None => return a.err("type-error", &format!("oxigraph/literal: expected :lang or :datatype keyword, got {}", a.type_name(v1))),
     };
-    let v2 = a.arg(args, nargs, 2);
+    let v2 = unsafe { a.arg(args, nargs, 2) };
     let tag_val = match a.get_string(v2) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("oxigraph/literal: expected string tag value, got {}", a.type_name(v2))),
@@ -298,7 +298,7 @@ extern "C" fn prim_blank_node(args: *const ElleValue, nargs: usize) -> ElleResul
         let b = BlankNode::default();
         return a.ok(bnode_to_elle(&b));
     }
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let id = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("oxigraph/blank-node: expected string id, got {}", a.type_name(v))),
@@ -379,7 +379,7 @@ extern "C" fn prim_insert(args: *const ElleValue, nargs: usize) -> ElleResult {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(a.arg(args, nargs, 1), "oxigraph/insert") {
+    let quad = match elle_quad_to_oxigraph(unsafe { a.arg(args, nargs, 1) }, "oxigraph/insert") {
         Ok(q) => q,
         Err(e) => return e,
     };
@@ -395,7 +395,7 @@ extern "C" fn prim_remove(args: *const ElleValue, nargs: usize) -> ElleResult {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(a.arg(args, nargs, 1), "oxigraph/remove") {
+    let quad = match elle_quad_to_oxigraph(unsafe { a.arg(args, nargs, 1) }, "oxigraph/remove") {
         Ok(q) => q,
         Err(e) => return e,
     };
@@ -411,7 +411,7 @@ extern "C" fn prim_contains(args: *const ElleValue, nargs: usize) -> ElleResult 
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(a.arg(args, nargs, 1), "oxigraph/contains") {
+    let quad = match elle_quad_to_oxigraph(unsafe { a.arg(args, nargs, 1) }, "oxigraph/contains") {
         Ok(q) => q,
         Err(e) => return e,
     };
@@ -444,7 +444,7 @@ extern "C" fn prim_query(args: *const ElleValue, nargs: usize) -> ElleResult {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let sparql = match a.get_string(v1) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("{}: expected string sparql, got {}", PRIM, a.type_name(v1))),
@@ -501,7 +501,7 @@ extern "C" fn prim_update(args: *const ElleValue, nargs: usize) -> ElleResult {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let sparql = match a.get_string(v1) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("{}: expected string sparql-update, got {}", PRIM, a.type_name(v1))),
@@ -534,12 +534,12 @@ extern "C" fn prim_load(args: *const ElleValue, nargs: usize) -> ElleResult {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let data = match a.get_string(v1) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("{}: expected string data, got {}", PRIM, a.type_name(v1))),
     };
-    let v2 = a.arg(args, nargs, 2);
+    let v2 = unsafe { a.arg(args, nargs, 2) };
     let format = match keyword_to_format(v2, PRIM) {
         Ok(f) => f,
         Err(e) => return e,
@@ -557,7 +557,7 @@ extern "C" fn prim_dump(args: *const ElleValue, nargs: usize) -> ElleResult {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let format = match keyword_to_format(v1, PRIM) {
         Ok(f) => f,
         Err(e) => return e,

@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "w2" }
+elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
 egui = "0.31"
 egui-winit = "0.31"
 egui_glow = "0.31"

@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "w2" }
+elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
 image = { version = "0.25", default-features = false, features = [
     "png", "jpeg", "gif", "webp", "tiff", "bmp", "ico", "qoi",
 ] }

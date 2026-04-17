@@ -1,6 +1,6 @@
 //! Elle syn plugin — Rust syntax parsing via the `syn` crate.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 use quote::ToTokens;
 
 elle_plugin::define_plugin!("syn/", &PRIMITIVES);
@@ -19,7 +19,7 @@ fn list(items: Vec<ElleValue>) -> ElleValue {
 
 extern "C" fn prim_syn_parse_file(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("syn/parse-file: expected string, got {}", a.type_name(v))),
@@ -32,7 +32,7 @@ extern "C" fn prim_syn_parse_file(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_syn_parse_expr(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("syn/parse-expr: expected string, got {}", a.type_name(v))),
@@ -45,7 +45,7 @@ extern "C" fn prim_syn_parse_expr(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_syn_parse_type(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("syn/parse-type: expected string, got {}", a.type_name(v))),
@@ -58,7 +58,7 @@ extern "C" fn prim_syn_parse_type(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_syn_parse_item(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("syn/parse-item: expected string, got {}", a.type_name(v))),
@@ -75,7 +75,7 @@ extern "C" fn prim_syn_parse_item(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_syn_items(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let file = match a.get_external::<syn::File>(v, "syn-file") {
         Some(f) => f,
         None => return a.err("type-error", &format!("syn/items: expected syn-file, got {}", a.type_name(v))),
@@ -88,7 +88,7 @@ extern "C" fn prim_syn_items(args: *const ElleValue, nargs: usize) -> ElleResult
 
 extern "C" fn prim_syn_item_kind(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/item-kind: expected syn-item, got {}", a.type_name(v))),
@@ -98,7 +98,7 @@ extern "C" fn prim_syn_item_kind(args: *const ElleValue, nargs: usize) -> ElleRe
 
 extern "C" fn prim_syn_item_name(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/item-name: expected syn-item, got {}", a.type_name(v))),
@@ -203,7 +203,7 @@ fn fields_to_elle(fields: &syn::Fields) -> (ElleValue, ElleValue) {
 
 extern "C" fn prim_syn_fn_info(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/fn-info: expected syn-item, got {}", a.type_name(v))),
@@ -233,7 +233,7 @@ extern "C" fn prim_syn_fn_info(args: *const ElleValue, nargs: usize) -> ElleResu
 
 extern "C" fn prim_syn_fn_args(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/fn-args: expected syn-item, got {}", a.type_name(v))),
@@ -247,7 +247,7 @@ extern "C" fn prim_syn_fn_args(args: *const ElleValue, nargs: usize) -> ElleResu
 
 extern "C" fn prim_syn_fn_return_type(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/fn-return-type: expected syn-item, got {}", a.type_name(v))),
@@ -264,7 +264,7 @@ extern "C" fn prim_syn_fn_return_type(args: *const ElleValue, nargs: usize) -> E
 
 extern "C" fn prim_syn_struct_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/struct-fields: expected syn-item, got {}", a.type_name(v))),
@@ -283,7 +283,7 @@ extern "C" fn prim_syn_struct_fields(args: *const ElleValue, nargs: usize) -> El
 
 extern "C" fn prim_syn_enum_variants(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/enum-variants: expected syn-item, got {}", a.type_name(v))),
@@ -313,7 +313,7 @@ extern "C" fn prim_syn_enum_variants(args: *const ElleValue, nargs: usize) -> El
 
 extern "C" fn prim_syn_attributes(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/attributes: expected syn-item, got {}", a.type_name(v))),
@@ -340,7 +340,7 @@ extern "C" fn prim_syn_attributes(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_syn_visibility(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/visibility: expected syn-item, got {}", a.type_name(v))),
@@ -459,7 +459,7 @@ fn path_to_string(path: &syn::Path) -> String {
 
 extern "C" fn prim_syn_fn_calls(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/fn-calls: expected syn-item, got {}", a.type_name(v))),
@@ -480,7 +480,7 @@ extern "C" fn prim_syn_fn_calls(args: *const ElleValue, nargs: usize) -> ElleRes
 
 extern "C" fn prim_syn_static_strings(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/static-strings: expected syn-item, got {}", a.type_name(v))),
@@ -515,7 +515,7 @@ fn collect_string_lits(expr: &syn::Expr, strings: &mut Vec<String>) {
 
 extern "C" fn prim_syn_primitive_defs(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/primitive-defs: expected syn-item, got {}", a.type_name(v))),
@@ -567,7 +567,7 @@ fn collect_primitive_defs(expr: &syn::Expr, results: &mut Vec<ElleValue>) {
 
 extern "C" fn prim_syn_to_string(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     if let Some(file) = a.get_external::<syn::File>(v, "syn-file") {
         return a.ok(a.string(&file.to_token_stream().to_string()));
     }
@@ -585,7 +585,7 @@ extern "C" fn prim_syn_to_string(args: *const ElleValue, nargs: usize) -> ElleRe
 
 extern "C" fn prim_syn_to_pretty_string(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     if let Some(file) = a.get_external::<syn::File>(v, "syn-file") {
         let s = prettyplease::unparse(file);
         return a.ok(a.string(s.trim_end()));
@@ -600,7 +600,7 @@ extern "C" fn prim_syn_to_pretty_string(args: *const ElleValue, nargs: usize) ->
 
 extern "C" fn prim_syn_item_line(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let v = a.arg(args, nargs, 0);
+    let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
         None => return a.err("type-error", &format!("syn/item-line: expected syn-item, got {}", a.type_name(v))),
