@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "w2" }
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 prettyplease = "0.2"
