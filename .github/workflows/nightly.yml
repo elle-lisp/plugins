@@ -1,0 +1,96 @@
+name: Nightly (elle HEAD)
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build against elle HEAD (${{ matrix.plugin }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - arrow
+          - crypto
+          - csv
+          - egui
+          - hash
+          - image
+          - jiff
+          - mqtt
+          - msgpack
+          - oxigraph
+          - polars
+          - protobuf
+          - random
+          - regex
+          - selkie
+          - svg
+          - syn
+          - tls
+          - toml
+          - tree-sitter
+          - vulkan
+          - wayland
+          - xml
+          - yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev llvm-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+      - name: Override elle-plugin to HEAD
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml << 'EOF'
+          [patch."https://github.com/elle-lisp/elle"]
+          elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+          EOF
+      - name: Build
+        run: cargo build --release -p elle-${{ matrix.plugin }}
+
+  test:
+    name: Plugin Tests (elle HEAD)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel libclang-dev llvm-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+      - name: Override elle-plugin to HEAD
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml << 'EOF'
+          [patch."https://github.com/elle-lisp/elle"]
+          elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+          EOF
+      - name: Build all plugins
+        run: cargo build --release
+      - name: Build elle
+        run: |
+          git clone --depth 1 https://github.com/elle-lisp/elle /tmp/elle
+          cd /tmp/elle && cargo build --release -p elle
+          echo "/tmp/elle/target/release" >> "$GITHUB_PATH"
+      - name: Copy plugin .so files
+        run: cp target/release/libelle_*.so /tmp/elle/target/release/
+      - name: Run plugin tests
+        run: |
+          printf '%s\n' tests/*.lisp | \
+            parallel -j 4 --halt now,fail=1 --tag \
+              'timeout 30s elle {}'
