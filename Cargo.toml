@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "arrow",
+    "crypto",
+    "csv",
+    "egui",
+    "hash",
+    "image",
+    "jiff",
+    "mqtt",
+    "msgpack",
+    "oxigraph",
+    "polars",
+    "protobuf",
+    "random",
+    "regex",
+    "selkie",
+    "svg",
+    "syn",
+    "tls",
+    "toml",
+    "tree-sitter",
+    "vulkan",
+    "wayland",
+    "xml",
+    "yaml",
+]
+resolver = "2"

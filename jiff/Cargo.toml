@@ -1,0 +1,11 @@
+[package]
+name = "elle-jiff"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+jiff = "0.2"

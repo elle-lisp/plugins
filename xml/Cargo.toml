@@ -1,0 +1,11 @@
+[package]
+name = "elle-xml"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+quick-xml = "0.37"

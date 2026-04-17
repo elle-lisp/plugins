@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build (${{ matrix.plugin }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - arrow
+          - crypto
+          - csv
+          - egui
+          - hash
+          - image
+          - jiff
+          - mqtt
+          - msgpack
+          - oxigraph
+          - polars
+          - protobuf
+          - random
+          - regex
+          - selkie
+          - svg
+          - syn
+          - tls
+          - toml
+          - tree-sitter
+          - vulkan
+          - wayland
+          - xml
+          - yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: plugin-${{ matrix.plugin }}
+      - name: Install libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev llvm-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+      - name: Build
+        run: cargo build --release -p elle-${{ matrix.plugin }}
+      - name: Upload .so
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.plugin }}
+          path: target/release/libelle_${{ matrix.plugin }}.so
+          retention-days: 7
+
+  test:
+    name: Plugin Tests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install elle + GNU parallel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel
+          # Build elle from source (needed to run test scripts)
+          git clone --depth 1 https://github.com/elle-lisp/elle /tmp/elle
+          cd /tmp/elle && cargo build --release -p elle
+          echo "/tmp/elle/target/release" >> "$GITHUB_PATH"
+      - name: Download all plugin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-*
+          path: target/release/
+          merge-multiple: true
+      - name: Run plugin tests
+        run: |
+          printf '%s\n' tests/*.lisp | \
+            parallel -j 4 --halt now,fail=1 --tag \
+              'timeout 30s elle {}'
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev llvm-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
