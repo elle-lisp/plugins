@@ -42,7 +42,7 @@ macro_rules! hash_primitive {
                     "{}: expected 1 argument, got {}", $prim_name, nargs,
                 ));
             }
-            let val = a.arg(args, nargs, 0);
+            let val = unsafe { a.arg(args, nargs, 0) };
             let data = match extract_byte_data(val, $prim_name, "argument") {
                 Ok(d) => d,
                 Err(e) => return e,
@@ -65,8 +65,8 @@ macro_rules! hmac_primitive {
                     "{}: expected 2 arguments, got {}", $prim_name, nargs,
                 ));
             }
-            let key_val = a.arg(args, nargs, 0);
-            let msg_val = a.arg(args, nargs, 1);
+            let key_val = unsafe { a.arg(args, nargs, 0) };
+            let msg_val = unsafe { a.arg(args, nargs, 1) };
             let key = match extract_byte_data(key_val, $prim_name, "key") {
                 Ok(d) => d,
                 Err(e) => return e,

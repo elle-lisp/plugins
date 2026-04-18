@@ -14,7 +14,7 @@ pub fn prim_messages(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/messages";
 
-    let pool = match get_pool(a.arg(args, nargs, 0), PRIM) {
+    let pool = match get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -35,12 +35,12 @@ pub fn prim_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/fields";
 
-    let pool = match get_pool(a.arg(args, nargs, 0), PRIM) {
+    let pool = match get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
 
-    let msg_name_val = a.arg(args, nargs, 1);
+    let msg_name_val = unsafe { a.arg(args, nargs, 1) };
     let msg_name = match a.get_string(msg_name_val) {
         Some(s) => s.to_string(),
         None => {
@@ -95,7 +95,7 @@ pub fn prim_enums(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/enums";
 
-    let pool = match get_pool(a.arg(args, nargs, 0), PRIM) {
+    let pool = match get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };

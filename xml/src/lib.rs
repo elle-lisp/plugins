@@ -296,7 +296,7 @@ fn attrs_from_start_streaming(
 
 extern "C" fn prim_xml_reader_new(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let s = match a.get_string(arg0) {
         Some(s) => s.to_string(),
         None => {
@@ -321,7 +321,7 @@ extern "C" fn prim_xml_reader_new(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_xml_next_event(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let state = match a.get_external::<XmlReaderState>(arg0, "xml-reader") {
         Some(s) => s,
         None => {
@@ -433,7 +433,7 @@ extern "C" fn prim_xml_next_event(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_xml_reader_close(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     match a.get_external::<XmlReaderState>(arg0, "xml-reader") {
         Some(_) => a.ok(a.nil()),
         None => a.err(
@@ -452,7 +452,7 @@ extern "C" fn prim_xml_reader_close(args: *const ElleValue, nargs: usize) -> Ell
 
 extern "C" fn prim_xml_parse(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let s = match a.get_string(arg0) {
         Some(s) => s.to_string(),
         None => {
@@ -470,7 +470,7 @@ extern "C" fn prim_xml_parse(args: *const ElleValue, nargs: usize) -> ElleResult
 
 extern "C" fn prim_xml_emit(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     if !a.check_struct(arg0) {
         return a.err(
             "xml-error",

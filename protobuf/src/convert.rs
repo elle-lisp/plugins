@@ -383,12 +383,12 @@ pub fn encode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/encode";
 
-    let pool = match crate::schema::get_pool(a.arg(args, nargs, 0), PRIM) {
+    let pool = match crate::schema::get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
 
-    let msg_name_val = a.arg(args, nargs, 1);
+    let msg_name_val = unsafe { a.arg(args, nargs, 1) };
     let msg_name = match a.get_string(msg_name_val) {
         Some(s) => s.to_string(),
         None => {
@@ -396,7 +396,7 @@ pub fn encode(args: *const ElleValue, nargs: usize) -> ElleResult {
         }
     };
 
-    let struct_val = a.arg(args, nargs, 2);
+    let struct_val = unsafe { a.arg(args, nargs, 2) };
     if !a.check_struct(struct_val) {
         return a.err("type-error", &format!("{}: expected struct, got {}", PRIM, a.type_name(struct_val)));
     }
@@ -422,12 +422,12 @@ pub fn decode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/decode";
 
-    let pool = match crate::schema::get_pool(a.arg(args, nargs, 0), PRIM) {
+    let pool = match crate::schema::get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
 
-    let msg_name_val = a.arg(args, nargs, 1);
+    let msg_name_val = unsafe { a.arg(args, nargs, 1) };
     let msg_name = match a.get_string(msg_name_val) {
         Some(s) => s.to_string(),
         None => {
@@ -435,7 +435,7 @@ pub fn decode(args: *const ElleValue, nargs: usize) -> ElleResult {
         }
     };
 
-    let bytes_val = a.arg(args, nargs, 2);
+    let bytes_val = unsafe { a.arg(args, nargs, 2) };
     let bytes = match crate::schema::extract_bytes(bytes_val, PRIM) {
         Ok(b) => b,
         Err(e) => return e,

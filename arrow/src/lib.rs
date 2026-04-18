@@ -201,7 +201,7 @@ elle_plugin::define_plugin!("arrow/", &PRIMITIVES);
 extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/batch";
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
 
     // The stable ABI does not expose struct key iteration, so we accept
     // an array of [name, data] pairs as the column specification format.
@@ -293,7 +293,7 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
 extern "C" fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/schema";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -316,7 +316,7 @@ extern "C" fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
 extern "C" fn prim_num_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/num-rows";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -327,7 +327,7 @@ extern "C" fn prim_num_rows(args: *const ElleValue, nargs: usize) -> ElleResult 
 extern "C" fn prim_num_cols(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/num-cols";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -338,11 +338,11 @@ extern "C" fn prim_num_cols(args: *const ElleValue, nargs: usize) -> ElleResult 
 extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/column";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
-    let col_name = match extract_string(a.arg(args, nargs, 1), name) {
+    let col_name = match extract_string(unsafe { a.arg(args, nargs, 1) }, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -364,7 +364,7 @@ extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
 extern "C" fn prim_to_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/to-rows";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -375,7 +375,7 @@ extern "C" fn prim_to_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
 extern "C" fn prim_display(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/display";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -389,7 +389,7 @@ extern "C" fn prim_display(args: *const ElleValue, nargs: usize) -> ElleResult {
 extern "C" fn prim_write_ipc(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/write-ipc";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -413,7 +413,7 @@ extern "C" fn prim_write_ipc(args: *const ElleValue, nargs: usize) -> ElleResult
 extern "C" fn prim_read_ipc(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/read-ipc";
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let bytes = match a.get_bytes(arg0) {
         Some(b) => b,
         None => {
@@ -456,7 +456,7 @@ extern "C" fn prim_read_ipc(args: *const ElleValue, nargs: usize) -> ElleResult 
 extern "C" fn prim_write_parquet(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/write-parquet";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -480,7 +480,7 @@ extern "C" fn prim_write_parquet(args: *const ElleValue, nargs: usize) -> ElleRe
 extern "C" fn prim_read_parquet(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/read-parquet";
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let raw_bytes = match a.get_bytes(arg0) {
         Some(b) => b,
         None => {
@@ -532,15 +532,15 @@ extern "C" fn prim_read_parquet(args: *const ElleValue, nargs: usize) -> ElleRes
 extern "C" fn prim_slice(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/slice";
-    let batch = match get_batch(a.arg(args, nargs, 0), name) {
+    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
-    let offset = match a.get_int(a.arg(args, nargs, 1)) {
+    let offset = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(o) => o as usize,
         None => return a.err("type-error", &format!("{}: offset must be integer", name)),
     };
-    let length = match a.get_int(a.arg(args, nargs, 2)) {
+    let length = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(l) => l as usize,
         None => return a.err("type-error", &format!("{}: length must be integer", name)),
     };

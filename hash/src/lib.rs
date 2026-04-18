@@ -68,7 +68,7 @@ fn oneshot_args(args: *const ElleValue, nargs: usize, name: &str) -> Result<Vec<
             &format!("{}: expected 1 argument, got {}", name, nargs),
         ));
     }
-    extract_bytes(a.arg(args, nargs, 0), name, "argument")
+    extract_bytes(unsafe { a.arg(args, nargs, 0) }, name, "argument")
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ extern "C" fn prim_blake3_keyed(args: *const ElleValue, nargs: usize) -> ElleRes
             &format!("hash/blake3-keyed: expected 2 arguments, got {}", nargs),
         );
     }
-    let key = match extract_bytes(a.arg(args, nargs, 0), "hash/blake3-keyed", "key") {
+    let key = match extract_bytes(unsafe { a.arg(args, nargs, 0) }, "hash/blake3-keyed", "key") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -135,7 +135,7 @@ extern "C" fn prim_blake3_keyed(args: *const ElleValue, nargs: usize) -> ElleRes
             ),
         );
     }
-    let data = match extract_bytes(a.arg(args, nargs, 1), "hash/blake3-keyed", "data") {
+    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/blake3-keyed", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -151,11 +151,11 @@ extern "C" fn prim_blake3_derive(args: *const ElleValue, nargs: usize) -> ElleRe
             &format!("hash/blake3-derive: expected 2 arguments, got {}", nargs),
         );
     }
-    let context = match extract_string(a.arg(args, nargs, 0), "hash/blake3-derive", "context") {
+    let context = match extract_string(unsafe { a.arg(args, nargs, 0) }, "hash/blake3-derive", "context") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let data = match extract_bytes(a.arg(args, nargs, 1), "hash/blake3-derive", "data") {
+    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/blake3-derive", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -237,7 +237,7 @@ extern "C" fn prim_hex(args: *const ElleValue, nargs: usize) -> ElleResult {
             &format!("hash/hex: expected 2 arguments, got {}", nargs),
         );
     }
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let kw = match a.get_keyword_name(arg0) {
         Some(k) => k.to_string(),
         None => {
@@ -250,7 +250,7 @@ extern "C" fn prim_hex(args: *const ElleValue, nargs: usize) -> ElleResult {
             );
         }
     };
-    let data = match extract_bytes(a.arg(args, nargs, 1), "hash/hex", "data") {
+    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/hex", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -430,7 +430,7 @@ extern "C" fn prim_hash_new(args: *const ElleValue, nargs: usize) -> ElleResult 
             &format!("hash/new: expected 1 argument, got {}", nargs),
         );
     }
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let kw = match a.get_keyword_name(arg0) {
         Some(k) => k.to_string(),
         None => {
@@ -454,7 +454,7 @@ extern "C" fn prim_hash_update(args: *const ElleValue, nargs: usize) -> ElleResu
             &format!("hash/update: expected 2 arguments, got {}", nargs),
         );
     }
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let cell = match a.get_external::<RefCell<HasherState>>(arg0, "hash/context") {
         Some(c) => c,
         None => {
@@ -467,7 +467,7 @@ extern "C" fn prim_hash_update(args: *const ElleValue, nargs: usize) -> ElleResu
             );
         }
     };
-    let data = match extract_bytes(a.arg(args, nargs, 1), "hash/update", "data") {
+    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/update", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -483,7 +483,7 @@ extern "C" fn prim_hash_finalize(args: *const ElleValue, nargs: usize) -> ElleRe
             &format!("hash/finalize: expected 1 argument, got {}", nargs),
         );
     }
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let cell = match a.get_external::<RefCell<HasherState>>(arg0, "hash/context") {
         Some(c) => c,
         None => {

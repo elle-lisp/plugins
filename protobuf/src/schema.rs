@@ -57,7 +57,7 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/schema";
 
-    let val0 = a.arg(args, nargs, 0);
+    let val0 = unsafe { a.arg(args, nargs, 0) };
     let proto_src = match a.get_string(val0) {
         Some(s) => s.to_string(),
         None => {
@@ -69,7 +69,7 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
     let mut include_dirs: Vec<String> = Vec::new();
 
     if nargs >= 2 {
-        let opts = a.arg(args, nargs, 1);
+        let opts = unsafe { a.arg(args, nargs, 1) };
         if !a.check_nil(opts) {
             if !a.check_struct(opts) {
                 return a.err("type-error", &format!("{}: expected struct for options, got {}", PRIM, a.type_name(opts)));
@@ -109,7 +109,7 @@ pub fn prim_schema_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/schema-bytes";
 
-    let val0 = a.arg(args, nargs, 0);
+    let val0 = unsafe { a.arg(args, nargs, 0) };
     let bytes = match extract_bytes(val0, PRIM) {
         Ok(b) => b,
         Err(e) => return e,

@@ -6,19 +6,19 @@ use crate::{api, get_image, require_float, require_int, wrap_image};
 
 pub(crate) extern "C" fn prim_overlay(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let mut base = match get_image(a.arg(args, nargs, 0), "image/overlay") { Ok(i) => i.to_rgba8(), Err(e) => return e };
-    let overlay = match get_image(a.arg(args, nargs, 1), "image/overlay") { Ok(i) => i.to_rgba8(), Err(e) => return e };
-    let x = match require_int(a.arg(args, nargs, 2), "image/overlay", "x") { Ok(v) => v, Err(e) => return e };
-    let y = match require_int(a.arg(args, nargs, 3), "image/overlay", "y") { Ok(v) => v, Err(e) => return e };
+    let mut base = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/overlay") { Ok(i) => i.to_rgba8(), Err(e) => return e };
+    let overlay = match get_image(unsafe { a.arg(args, nargs, 1) }, "image/overlay") { Ok(i) => i.to_rgba8(), Err(e) => return e };
+    let x = match require_int(unsafe { a.arg(args, nargs, 2) }, "image/overlay", "x") { Ok(v) => v, Err(e) => return e };
+    let y = match require_int(unsafe { a.arg(args, nargs, 3) }, "image/overlay", "y") { Ok(v) => v, Err(e) => return e };
     image::imageops::overlay(&mut base, &overlay, x, y);
     a.ok(wrap_image(DynamicImage::ImageRgba8(base)))
 }
 
 pub(crate) extern "C" fn prim_blend(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let img1 = match get_image(a.arg(args, nargs, 0), "image/blend") { Ok(i) => i.to_rgba8(), Err(e) => return e };
-    let img2 = match get_image(a.arg(args, nargs, 1), "image/blend") { Ok(i) => i.to_rgba8(), Err(e) => return e };
-    let alpha = match require_float(a.arg(args, nargs, 2), "image/blend", "alpha") { Ok(v) => v as f32, Err(e) => return e };
+    let img1 = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/blend") { Ok(i) => i.to_rgba8(), Err(e) => return e };
+    let img2 = match get_image(unsafe { a.arg(args, nargs, 1) }, "image/blend") { Ok(i) => i.to_rgba8(), Err(e) => return e };
+    let alpha = match require_float(unsafe { a.arg(args, nargs, 2) }, "image/blend", "alpha") { Ok(v) => v as f32, Err(e) => return e };
     if img1.dimensions() != img2.dimensions() {
         return a.err("value-error", &format!("image/blend: images must have same dimensions, got {}x{} and {}x{}", img1.width(), img1.height(), img2.width(), img2.height()));
     }

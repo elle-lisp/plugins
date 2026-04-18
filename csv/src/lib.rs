@@ -101,12 +101,12 @@ extern "C" fn prim_csv_parse(args: *const ElleValue, nargs: usize) -> ElleResult
             &format!("{}: expected 1 or 2 arguments, got {}", name, nargs),
         );
     }
-    let text = match extract_string(a.arg(args, nargs, 0), name) {
+    let text = match extract_string(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let opts = if nargs == 2 {
-        a.arg(args, nargs, 1)
+        unsafe { a.arg(args, nargs, 1) }
     } else {
         a.nil()
     };
@@ -153,12 +153,12 @@ extern "C" fn prim_csv_parse_rows(args: *const ElleValue, nargs: usize) -> ElleR
             &format!("{}: expected 1 or 2 arguments, got {}", name, nargs),
         );
     }
-    let text = match extract_string(a.arg(args, nargs, 0), name) {
+    let text = match extract_string(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let opts = if nargs == 2 {
-        a.arg(args, nargs, 1)
+        unsafe { a.arg(args, nargs, 1) }
     } else {
         a.nil()
     };
@@ -197,7 +197,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
     }
 
     // rows must be an array
-    let rows_val = a.arg(args, nargs, 0);
+    let rows_val = unsafe { a.arg(args, nargs, 0) };
     let row_count = match a.get_array_len(rows_val) {
         Some(n) => n,
         None => {
@@ -209,7 +209,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
     };
 
     let opts = if nargs == 2 {
-        a.arg(args, nargs, 1)
+        unsafe { a.arg(args, nargs, 1) }
     } else {
         a.nil()
     };
@@ -266,7 +266,7 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
     }
 
     // rows must be an array
-    let rows_val = a.arg(args, nargs, 0);
+    let rows_val = unsafe { a.arg(args, nargs, 0) };
     let row_count = match a.get_array_len(rows_val) {
         Some(n) => n,
         None => {
@@ -278,7 +278,7 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
     };
 
     let opts = if nargs == 2 {
-        a.arg(args, nargs, 1)
+        unsafe { a.arg(args, nargs, 1) }
     } else {
         a.nil()
     };

@@ -111,7 +111,7 @@ fn parse_render_opts(
         height: None,
     };
     if nargs > idx {
-        let opt_val = a.arg(args, nargs, idx);
+        let opt_val = unsafe { a.arg(args, nargs, idx) };
         if a.check_struct(opt_val) {
             let w_val = a.get_struct_field(opt_val, "width");
             if let Some(w) = a.get_int(w_val) {
@@ -148,7 +148,7 @@ fn render_svg_to_pixmap(
 
 extern "C" fn prim_render(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(a.arg(args, nargs, 0), "svg/render") {
+    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/render") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -164,7 +164,7 @@ extern "C" fn prim_render(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_render_raw(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(a.arg(args, nargs, 0), "svg/render-raw") {
+    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/render-raw") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -186,11 +186,11 @@ extern "C" fn prim_render_raw(args: *const ElleValue, nargs: usize) -> ElleResul
 
 extern "C" fn prim_render_to_file(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(a.arg(args, nargs, 0), "svg/render-to-file") {
+    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/render-to-file") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let path = match require_string(a.arg(args, nargs, 1), "svg/render-to-file", "path") {
+    let path = match require_string(unsafe { a.arg(args, nargs, 1) }, "svg/render-to-file", "path") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -206,7 +206,7 @@ extern "C" fn prim_render_to_file(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_dimensions(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(a.arg(args, nargs, 0), "svg/dimensions") {
+    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/dimensions") {
         Ok(s) => s,
         Err(e) => return e,
     };

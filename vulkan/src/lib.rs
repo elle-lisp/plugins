@@ -54,12 +54,12 @@ extern "C" fn prim_init(_args: *const ElleValue, _nargs: usize) -> ElleResult {
 
 extern "C" fn prim_shader(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let ctx = match get_ctx(a.arg(args, nargs, 0), "vulkan/shader") {
+    let ctx = match get_ctx(unsafe { a.arg(args, nargs, 0) }, "vulkan/shader") {
         Ok(c) => c,
         Err(e) => return e,
     };
-    let spirv_val = a.arg(args, nargs, 1);
-    let num_buf_val = a.arg(args, nargs, 2);
+    let spirv_val = unsafe { a.arg(args, nargs, 1) };
+    let num_buf_val = unsafe { a.arg(args, nargs, 2) };
     let num_buffers = match a.get_int(num_buf_val) {
         Some(n) if n > 0 => n as u32,
         _ => return a.err("value-error", "vulkan/shader: num-buffers must be positive"),
@@ -89,13 +89,13 @@ extern "C" fn prim_shader(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let shader = match get_shader(a.arg(args, nargs, 0), "vulkan/dispatch") {
+    let shader = match get_shader(unsafe { a.arg(args, nargs, 0) }, "vulkan/dispatch") {
         Ok(s) => s,
         Err(e) => return e,
     };
 
     let wg = |i: usize, name: &str| -> Result<u32, ElleResult> {
-        match a.get_int(a.arg(args, nargs, i)) {
+        match a.get_int(unsafe { a.arg(args, nargs, i) }) {
             Some(n) if n > 0 => Ok(n as u32),
             _ => Err(a.err("value-error", &format!("vulkan/dispatch: {name} must be positive"))),
         }
@@ -104,7 +104,7 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
     let wg_y = match wg(2, "wg-y") { Ok(v) => v, Err(e) => return e };
     let wg_z = match wg(3, "wg-z") { Ok(v) => v, Err(e) => return e };
 
-    let bufs_val = a.arg(args, nargs, 4);
+    let bufs_val = unsafe { a.arg(args, nargs, 4) };
     let buf_len = match a.get_array_len(bufs_val) {
         Some(n) => n,
         None => return a.err("type-error", "vulkan/dispatch: buffers must be an array"),
@@ -146,7 +146,7 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
 
 extern "C" fn prim_wait(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let handle_val = a.arg(args, nargs, 0);
+    let handle_val = unsafe { a.arg(args, nargs, 0) };
     let handle = match a.get_external::<GpuHandle>(handle_val, "vulkan-handle") {
         Some(h) => h,
         None => {
@@ -167,7 +167,7 @@ extern "C" fn prim_wait(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_collect(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let handle_val = a.arg(args, nargs, 0);
+    let handle_val = unsafe { a.arg(args, nargs, 0) };
     let handle = match a.get_external::<GpuHandle>(handle_val, "vulkan-handle") {
         Some(h) => h,
         None => {
@@ -190,13 +190,13 @@ extern "C" fn prim_collect(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_submit(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let shader = match get_shader(a.arg(args, nargs, 0), "vulkan/submit") {
+    let shader = match get_shader(unsafe { a.arg(args, nargs, 0) }, "vulkan/submit") {
         Ok(s) => s,
         Err(e) => return e,
     };
 
     let wg = |i: usize, name: &str| -> Result<u32, ElleResult> {
-        match a.get_int(a.arg(args, nargs, i)) {
+        match a.get_int(unsafe { a.arg(args, nargs, i) }) {
             Some(n) if n > 0 => Ok(n as u32),
             _ => Err(a.err("value-error", &format!("vulkan/submit: {name} must be positive"))),
         }
@@ -205,7 +205,7 @@ extern "C" fn prim_submit(args: *const ElleValue, nargs: usize) -> ElleResult {
     let wg_y = match wg(2, "wg-y") { Ok(v) => v, Err(e) => return e };
     let wg_z = match wg(3, "wg-z") { Ok(v) => v, Err(e) => return e };
 
-    let bufs_val = a.arg(args, nargs, 4);
+    let bufs_val = unsafe { a.arg(args, nargs, 4) };
     let buf_len = match a.get_array_len(bufs_val) {
         Some(n) => n,
         None => return a.err("type-error", "vulkan/submit: buffers must be an array"),
@@ -377,7 +377,7 @@ fn parse_buffer_spec(
 
 extern "C" fn prim_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let bytes_val = a.arg(args, nargs, 0);
+    let bytes_val = unsafe { a.arg(args, nargs, 0) };
     let bytes = match a.get_bytes(bytes_val) {
         Some(b) => b.to_vec(),
         None => {
@@ -388,7 +388,7 @@ extern "C" fn prim_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
         }
     };
 
-    let dtype_val = a.arg(args, nargs, 1);
+    let dtype_val = unsafe { a.arg(args, nargs, 1) };
     let dtype = match extract_keyword(dtype_val) {
         Some(k) if matches!(k.as_str(), "f32" | "u32" | "i32" | "i64" | "raw") => k,
         _ => {
@@ -409,7 +409,7 @@ extern "C" fn prim_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_f32_bits(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let f = if let Some(f) = a.get_float(val) {
         f
     } else if let Some(i) = a.get_int(val) {
@@ -428,12 +428,12 @@ extern "C" fn prim_f32_bits(args: *const ElleValue, nargs: usize) -> ElleResult 
 
 extern "C" fn prim_persist(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let ctx = match get_ctx(a.arg(args, nargs, 0), "vulkan/persist") {
+    let ctx = match get_ctx(unsafe { a.arg(args, nargs, 0) }, "vulkan/persist") {
         Ok(c) => c,
         Err(e) => return e,
     };
 
-    let spec = match parse_buffer_spec(a.arg(args, nargs, 1), 0, "vulkan/persist") {
+    let spec = match parse_buffer_spec(unsafe { a.arg(args, nargs, 1) }, 0, "vulkan/persist") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -475,7 +475,7 @@ extern "C" fn prim_persist(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_update(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let buf_val = a.arg(args, nargs, 0);
+    let buf_val = unsafe { a.arg(args, nargs, 0) };
     let gpu_buf = match a.get_external::<GpuBuffer>(buf_val, "vulkan-buffer") {
         Some(b) => b,
         None => {
@@ -486,7 +486,7 @@ extern "C" fn prim_update(args: *const ElleValue, nargs: usize) -> ElleResult {
         }
     };
 
-    let spec = match parse_buffer_spec(a.arg(args, nargs, 1), 0, "vulkan/update") {
+    let spec = match parse_buffer_spec(unsafe { a.arg(args, nargs, 1) }, 0, "vulkan/update") {
         Ok(s) => s,
         Err(e) => return e,
     };

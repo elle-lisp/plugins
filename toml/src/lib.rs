@@ -104,7 +104,7 @@ extern "C" fn prim_toml_parse(args: *const ElleValue, nargs: usize) -> ElleResul
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
     }
-    let text = match a.get_string(a.arg(args, nargs, 0)) {
+    let text = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
@@ -112,7 +112,7 @@ extern "C" fn prim_toml_parse(args: *const ElleValue, nargs: usize) -> ElleResul
                 &format!(
                     "{}: expected string, got {}",
                     name,
-                    a.type_name(a.arg(args, nargs, 0))
+                    a.type_name(unsafe { a.arg(args, nargs, 0) })
                 ),
             );
         }
@@ -132,7 +132,7 @@ extern "C" fn prim_toml_encode(args: *const ElleValue, nargs: usize) -> ElleResu
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
     }
-    let tv = match value_to_toml(a.arg(args, nargs, 0), name) {
+    let tv = match value_to_toml(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(v) => v,
         Err(e) => return e,
     };

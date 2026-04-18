@@ -99,7 +99,7 @@ extern "C" fn prim_regex_compile(args: *const ElleValue, nargs: usize) -> ElleRe
     if let Err(e) = require_arity("regex/compile", nargs, 1) {
         return e;
     }
-    let pattern = match require_string("regex/compile", a.arg(args, nargs, 0)) {
+    let pattern = match require_string("regex/compile", unsafe { a.arg(args, nargs, 0) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -114,11 +114,11 @@ extern "C" fn prim_regex_match(args: *const ElleValue, nargs: usize) -> ElleResu
     if let Err(e) = require_arity("regex/match?", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/match?", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/match?", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/match?", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/match?", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -130,11 +130,11 @@ extern "C" fn prim_regex_find(args: *const ElleValue, nargs: usize) -> ElleResul
     if let Err(e) = require_arity("regex/find", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/find", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/find", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/find", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/find", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -149,11 +149,11 @@ extern "C" fn prim_regex_find_all(args: *const ElleValue, nargs: usize) -> ElleR
     if let Err(e) = require_arity("regex/find-all", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/find-all", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/find-all", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/find-all", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/find-all", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -166,11 +166,11 @@ extern "C" fn prim_regex_captures(args: *const ElleValue, nargs: usize) -> ElleR
     if let Err(e) = require_arity("regex/captures", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/captures", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/captures", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/captures", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/captures", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -185,11 +185,11 @@ extern "C" fn prim_regex_captures_all(args: *const ElleValue, nargs: usize) -> E
     if let Err(e) = require_arity("regex/captures-all", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/captures-all", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/captures-all", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/captures-all", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/captures-all", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -205,15 +205,15 @@ extern "C" fn prim_regex_replace(args: *const ElleValue, nargs: usize) -> ElleRe
     if let Err(e) = require_arity("regex/replace", nargs, 3) {
         return e;
     }
-    let re = match require_regex("regex/replace", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/replace", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/replace", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/replace", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let replacement = match require_string("regex/replace", a.arg(args, nargs, 2)) {
+    let replacement = match require_string("regex/replace", unsafe { a.arg(args, nargs, 2) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -226,15 +226,15 @@ extern "C" fn prim_regex_replace_all(args: *const ElleValue, nargs: usize) -> El
     if let Err(e) = require_arity("regex/replace-all", nargs, 3) {
         return e;
     }
-    let re = match require_regex("regex/replace-all", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/replace-all", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/replace-all", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/replace-all", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let replacement = match require_string("regex/replace-all", a.arg(args, nargs, 2)) {
+    let replacement = match require_string("regex/replace-all", unsafe { a.arg(args, nargs, 2) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -247,11 +247,11 @@ extern "C" fn prim_regex_split(args: *const ElleValue, nargs: usize) -> ElleResu
     if let Err(e) = require_arity("regex/split", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/split", a.arg(args, nargs, 0)) {
+    let re = match require_regex("regex/split", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/split", a.arg(args, nargs, 1)) {
+    let text = match require_string("regex/split", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };

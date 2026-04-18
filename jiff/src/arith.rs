@@ -29,8 +29,8 @@ macro_rules! arith_prim {
     ($fn_name:ident, $prim_name:expr, $variant:ident, $type_name:expr, $op:ident) => {
         pub extern "C" fn $fn_name(args: *const ElleValue, nargs: usize) -> ElleResult {
             let a = crate::api();
-            let v = match require_variant!(a.arg(args, nargs, 0), $variant, $prim_name, $type_name) { Ok(v) => v.clone(), Err(e) => return e };
-            let rhs = match require_span_like(a.arg(args, nargs, 1), $prim_name) { Ok(jv) => jv, Err(e) => return e };
+            let v = match require_variant!(unsafe { a.arg(args, nargs, 0) }, $variant, $prim_name, $type_name) { Ok(v) => v.clone(), Err(e) => return e };
+            let rhs = match require_span_like(unsafe { a.arg(args, nargs, 1) }, $prim_name) { Ok(jv) => jv, Err(e) => return e };
             match rhs {
                 JiffValue::Span(s) => match v.$op(*s) { Ok(r) => a.ok(jiff_val(JiffValue::$variant(r))), Err(e) => jiff_err($prim_name, e) },
                 JiffValue::SignedDuration(d) => match v.$op(*d) { Ok(r) => a.ok(jiff_val(JiffValue::$variant(r))), Err(e) => jiff_err($prim_name, e) },
@@ -51,8 +51,8 @@ arith_prim!(prim_timestamp_sub, "timestamp/sub", Timestamp, "timestamp", checked
 
 pub extern "C" fn prim_zoned_add(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let z = match require_variant!(a.arg(args, nargs, 0), Zoned, "zoned/add", "zoned") { Ok(z) => z, Err(e) => return e };
-    let rhs = match require_span_like(a.arg(args, nargs, 1), "zoned/add") { Ok(jv) => jv, Err(e) => return e };
+    let z = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Zoned, "zoned/add", "zoned") { Ok(z) => z, Err(e) => return e };
+    let rhs = match require_span_like(unsafe { a.arg(args, nargs, 1) }, "zoned/add") { Ok(jv) => jv, Err(e) => return e };
     match rhs {
         JiffValue::Span(s) => match z.as_ref().checked_add(*s) { Ok(r) => a.ok(jiff_val(JiffValue::Zoned(Box::new(r)))), Err(e) => jiff_err("zoned/add", e) },
         JiffValue::SignedDuration(d) => match z.as_ref().checked_add(*d) { Ok(r) => a.ok(jiff_val(JiffValue::Zoned(Box::new(r)))), Err(e) => jiff_err("zoned/add", e) },
@@ -62,8 +62,8 @@ pub extern "C" fn prim_zoned_add(args: *const ElleValue, nargs: usize) -> ElleRe
 
 pub extern "C" fn prim_zoned_sub(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let z = match require_variant!(a.arg(args, nargs, 0), Zoned, "zoned/sub", "zoned") { Ok(z) => z, Err(e) => return e };
-    let rhs = match require_span_like(a.arg(args, nargs, 1), "zoned/sub") { Ok(jv) => jv, Err(e) => return e };
+    let z = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Zoned, "zoned/sub", "zoned") { Ok(z) => z, Err(e) => return e };
+    let rhs = match require_span_like(unsafe { a.arg(args, nargs, 1) }, "zoned/sub") { Ok(jv) => jv, Err(e) => return e };
     match rhs {
         JiffValue::Span(s) => match z.as_ref().checked_sub(*s) { Ok(r) => a.ok(jiff_val(JiffValue::Zoned(Box::new(r)))), Err(e) => jiff_err("zoned/sub", e) },
         JiffValue::SignedDuration(d) => match z.as_ref().checked_sub(*d) { Ok(r) => a.ok(jiff_val(JiffValue::Zoned(Box::new(r)))), Err(e) => jiff_err("zoned/sub", e) },
@@ -73,10 +73,10 @@ pub extern "C" fn prim_zoned_sub(args: *const ElleValue, nargs: usize) -> ElleRe
 
 pub extern "C" fn prim_timestamp_since(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ts_a = match require_variant!(a.arg(args, nargs, 0), Timestamp, "timestamp/since", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
-    let ts_b = match require_variant!(a.arg(args, nargs, 1), Timestamp, "timestamp/since", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
+    let ts_a = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Timestamp, "timestamp/since", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
+    let ts_b = match require_variant!(unsafe { a.arg(args, nargs, 1) }, Timestamp, "timestamp/since", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
     if nargs > 2 {
-        let unit_kw = match require_keyword(a.arg(args, nargs, 2), "timestamp/since") { Ok(k) => k, Err(e) => return e };
+        let unit_kw = match require_keyword(unsafe { a.arg(args, nargs, 2) }, "timestamp/since") { Ok(k) => k, Err(e) => return e };
         let unit = match parse_unit(&unit_kw) { Some(u) => u, None => return a.err("jiff-error", &format!("timestamp/since: unknown unit {:?}", unit_kw)) };
         match ts_a.since((unit, ts_b)) { Ok(s) => a.ok(jiff_val(JiffValue::Span(s))), Err(e) => jiff_err("timestamp/since", e) }
     } else {
@@ -86,10 +86,10 @@ pub extern "C" fn prim_timestamp_since(args: *const ElleValue, nargs: usize) -> 
 
 pub extern "C" fn prim_timestamp_until(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ts_a = match require_variant!(a.arg(args, nargs, 0), Timestamp, "timestamp/until", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
-    let ts_b = match require_variant!(a.arg(args, nargs, 1), Timestamp, "timestamp/until", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
+    let ts_a = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Timestamp, "timestamp/until", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
+    let ts_b = match require_variant!(unsafe { a.arg(args, nargs, 1) }, Timestamp, "timestamp/until", "timestamp") { Ok(ts) => *ts, Err(e) => return e };
     if nargs > 2 {
-        let unit_kw = match require_keyword(a.arg(args, nargs, 2), "timestamp/until") { Ok(k) => k, Err(e) => return e };
+        let unit_kw = match require_keyword(unsafe { a.arg(args, nargs, 2) }, "timestamp/until") { Ok(k) => k, Err(e) => return e };
         let unit = match parse_unit(&unit_kw) { Some(u) => u, None => return a.err("jiff-error", &format!("timestamp/until: unknown unit {:?}", unit_kw)) };
         match ts_a.until((unit, ts_b)) { Ok(s) => a.ok(jiff_val(JiffValue::Span(s))), Err(e) => jiff_err("timestamp/until", e) }
     } else {
@@ -99,10 +99,10 @@ pub extern "C" fn prim_timestamp_until(args: *const ElleValue, nargs: usize) -> 
 
 pub extern "C" fn prim_zoned_until(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let za = match require_variant!(a.arg(args, nargs, 0), Zoned, "zoned/until", "zoned") { Ok(z) => z, Err(e) => return e };
-    let zb = match require_variant!(a.arg(args, nargs, 1), Zoned, "zoned/until", "zoned") { Ok(z) => z, Err(e) => return e };
+    let za = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Zoned, "zoned/until", "zoned") { Ok(z) => z, Err(e) => return e };
+    let zb = match require_variant!(unsafe { a.arg(args, nargs, 1) }, Zoned, "zoned/until", "zoned") { Ok(z) => z, Err(e) => return e };
     if nargs > 2 {
-        let unit_kw = match require_keyword(a.arg(args, nargs, 2), "zoned/until") { Ok(k) => k, Err(e) => return e };
+        let unit_kw = match require_keyword(unsafe { a.arg(args, nargs, 2) }, "zoned/until") { Ok(k) => k, Err(e) => return e };
         let unit = match parse_unit(&unit_kw) { Some(u) => u, None => return a.err("jiff-error", &format!("zoned/until: unknown unit {:?}", unit_kw)) };
         match za.as_ref().until((unit, zb.as_ref())) { Ok(s) => a.ok(jiff_val(JiffValue::Span(s))), Err(e) => jiff_err("zoned/until", e) }
     } else {
@@ -112,54 +112,54 @@ pub extern "C" fn prim_zoned_until(args: *const ElleValue, nargs: usize) -> Elle
 
 pub extern "C" fn prim_span_add(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let sa = match require_variant!(a.arg(args, nargs, 0), Span, "span/add", "span") { Ok(s) => *s, Err(e) => return e };
-    let sb = match require_variant!(a.arg(args, nargs, 1), Span, "span/add", "span") { Ok(s) => *s, Err(e) => return e };
+    let sa = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/add", "span") { Ok(s) => *s, Err(e) => return e };
+    let sb = match require_variant!(unsafe { a.arg(args, nargs, 1) }, Span, "span/add", "span") { Ok(s) => *s, Err(e) => return e };
     match sa.checked_add(sb) { Ok(s) => a.ok(jiff_val(JiffValue::Span(s))), Err(e) => jiff_err("span/add", e) }
 }
 
 pub extern "C" fn prim_span_mul(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span/mul", "span") { Ok(s) => *s, Err(e) => return e };
-    let n = match require_int(a.arg(args, nargs, 1), "span/mul") { Ok(n) => n, Err(e) => return e };
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/mul", "span") { Ok(s) => *s, Err(e) => return e };
+    let n = match require_int(unsafe { a.arg(args, nargs, 1) }, "span/mul") { Ok(n) => n, Err(e) => return e };
     match s.checked_mul(n) { Ok(r) => a.ok(jiff_val(JiffValue::Span(r))), Err(e) => jiff_err("span/mul", e) }
 }
 
 pub extern "C" fn prim_span_negate(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span/negate", "span") { Ok(s) => *s, Err(e) => return e };
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/negate", "span") { Ok(s) => *s, Err(e) => return e };
     a.ok(jiff_val(JiffValue::Span(s.negate())))
 }
 
 pub extern "C" fn prim_span_abs(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span/abs", "span") { Ok(s) => *s, Err(e) => return e };
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/abs", "span") { Ok(s) => *s, Err(e) => return e };
     a.ok(jiff_val(JiffValue::Span(s.abs())))
 }
 
 pub extern "C" fn prim_span_total(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span-total", "span") { Ok(s) => *s, Err(e) => return e };
-    let unit_kw = match require_keyword(a.arg(args, nargs, 1), "span-total") { Ok(k) => k, Err(e) => return e };
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span-total", "span") { Ok(s) => *s, Err(e) => return e };
+    let unit_kw = match require_keyword(unsafe { a.arg(args, nargs, 1) }, "span-total") { Ok(k) => k, Err(e) => return e };
     let unit = match parse_unit(&unit_kw) { Some(u) => u, None => return a.err("jiff-error", &format!("span-total: unknown unit {:?}", unit_kw)) };
     match s.total(unit) { Ok(f) => a.ok(a.float(f)), Err(e) => jiff_err("span-total", e) }
 }
 
 pub extern "C" fn prim_sd_add(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let da = match require_variant!(a.arg(args, nargs, 0), SignedDuration, "signed-duration/add", "signed-duration") { Ok(d) => *d, Err(e) => return e };
-    let db = match require_variant!(a.arg(args, nargs, 1), SignedDuration, "signed-duration/add", "signed-duration") { Ok(d) => *d, Err(e) => return e };
+    let da = match require_variant!(unsafe { a.arg(args, nargs, 0) }, SignedDuration, "signed-duration/add", "signed-duration") { Ok(d) => *d, Err(e) => return e };
+    let db = match require_variant!(unsafe { a.arg(args, nargs, 1) }, SignedDuration, "signed-duration/add", "signed-duration") { Ok(d) => *d, Err(e) => return e };
     match da.checked_add(db) { Some(r) => a.ok(jiff_val(JiffValue::SignedDuration(r))), None => a.err("jiff-error", "signed-duration/add: overflow") }
 }
 
 pub extern "C" fn prim_sd_negate(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let d = match require_variant!(a.arg(args, nargs, 0), SignedDuration, "signed-duration/negate", "signed-duration") { Ok(d) => *d, Err(e) => return e };
+    let d = match require_variant!(unsafe { a.arg(args, nargs, 0) }, SignedDuration, "signed-duration/negate", "signed-duration") { Ok(d) => *d, Err(e) => return e };
     match d.checked_neg() { Some(r) => a.ok(jiff_val(JiffValue::SignedDuration(r))), None => a.err("jiff-error", "signed-duration/negate: overflow") }
 }
 
 pub extern "C" fn prim_sd_abs(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let d = match require_variant!(a.arg(args, nargs, 0), SignedDuration, "signed-duration/abs", "signed-duration") { Ok(d) => *d, Err(e) => return e };
+    let d = match require_variant!(unsafe { a.arg(args, nargs, 0) }, SignedDuration, "signed-duration/abs", "signed-duration") { Ok(d) => *d, Err(e) => return e };
     a.ok(jiff_val(JiffValue::SignedDuration(d.abs())))
 }
 
@@ -171,8 +171,8 @@ fn span_fields(s: &jiff::Span) -> [i64; 10] {
 
 pub extern "C" fn prim_temporal_compare(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let jv_a = match require_jiff(a.arg(args, nargs, 0), "temporal/compare") { Ok(jv) => jv, Err(e) => return e };
-    let jv_b = match require_jiff(a.arg(args, nargs, 1), "temporal/compare") { Ok(jv) => jv, Err(e) => return e };
+    let jv_a = match require_jiff(unsafe { a.arg(args, nargs, 0) }, "temporal/compare") { Ok(jv) => jv, Err(e) => return e };
+    let jv_b = match require_jiff(unsafe { a.arg(args, nargs, 1) }, "temporal/compare") { Ok(jv) => jv, Err(e) => return e };
     use std::cmp::Ordering;
     let ord = match (jv_a, jv_b) {
         (JiffValue::Timestamp(x), JiffValue::Timestamp(y)) => x.cmp(y),

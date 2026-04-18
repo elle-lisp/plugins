@@ -1,6 +1,6 @@
 //! Elle protobuf plugin — dynamic protobuf encode/decode via descriptor pools.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
+use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("protobuf/", &PRIMITIVES);
 

@@ -49,7 +49,7 @@ fn get_state<'a>(
     name: &str,
 ) -> Result<&'a MqttState, ElleResult> {
     let a = api();
-    let val = a.arg(args, nargs, idx);
+    let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<MqttState>(val, "mqtt-state").ok_or_else(|| {
         a.err(
             "type-error",
@@ -216,7 +216,7 @@ extern "C" fn prim_mqtt_state(args: *const ElleValue, nargs: usize) -> ElleResul
     let mut keep_alive = 60u16;
 
     if nargs > 0 {
-        let arg0 = a.arg(args, nargs, 0);
+        let arg0 = unsafe { a.arg(args, nargs, 0) };
         if a.check_struct(arg0) {
             let proto_val = struct_get_kw(arg0, "protocol");
             if let Some(i) = a.get_int(proto_val) {
@@ -252,7 +252,7 @@ extern "C" fn prim_mqtt_encode_connect(args: *const ElleValue, nargs: usize) -> 
         Err(e) => return e,
     };
 
-    let opts = a.arg(args, nargs, 1);
+    let opts = unsafe { a.arg(args, nargs, 1) };
     if !a.check_struct(opts) {
         return a.err("type-error", &format!("{}: expected struct for opts", name));
     }
@@ -296,7 +296,7 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
         Err(e) => return e,
     };
 
-    let topic_val = a.arg(args, nargs, 1);
+    let topic_val = unsafe { a.arg(args, nargs, 1) };
     let topic = match a.get_string(topic_val) {
         Some(s) => s.to_string(),
         None => {
@@ -304,7 +304,7 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
         }
     };
 
-    let payload_val = a.arg(args, nargs, 2);
+    let payload_val = unsafe { a.arg(args, nargs, 2) };
     let payload: Vec<u8> = if let Some(b) = a.get_bytes(payload_val) {
         b.to_vec()
     } else if let Some(s) = a.get_string(payload_val) {
@@ -320,7 +320,7 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
     let mut retain = false;
 
     if nargs > 3 {
-        let opts = a.arg(args, nargs, 3);
+        let opts = unsafe { a.arg(args, nargs, 3) };
         if a.check_struct(opts) {
             let qos_val = struct_get_kw(opts, "qos");
             if let Some(i) = a.get_int(qos_val) {
@@ -365,7 +365,7 @@ extern "C" fn prim_mqtt_encode_subscribe(args: *const ElleValue, nargs: usize) -
     };
 
     // args[1] is an array of [topic qos] pairs
-    let topics_arg = a.arg(args, nargs, 1);
+    let topics_arg = unsafe { a.arg(args, nargs, 1) };
     let topics_len = match a.get_array_len(topics_arg) {
         Some(l) => l,
         None => {
@@ -423,7 +423,7 @@ extern "C" fn prim_mqtt_encode_unsubscribe(args: *const ElleValue, nargs: usize)
         Err(e) => return e,
     };
 
-    let topics_arg = a.arg(args, nargs, 1);
+    let topics_arg = unsafe { a.arg(args, nargs, 1) };
     let topics_len = match a.get_array_len(topics_arg) {
         Some(l) => l,
         None => {
@@ -493,7 +493,7 @@ extern "C" fn prim_mqtt_encode_puback(args: *const ElleValue, nargs: usize) -> E
         Ok(s) => s,
         Err(e) => return e,
     };
-    let pkid_val = a.arg(args, nargs, 1);
+    let pkid_val = unsafe { a.arg(args, nargs, 1) };
     let pkid = match a.get_int(pkid_val) {
         Some(i) if i > 0 && i <= u16::MAX as i64 => i as u16,
         _ => return mqtt_err(name, "packet-id must be a positive integer"),
@@ -514,7 +514,7 @@ extern "C" fn prim_mqtt_feed(args: *const ElleValue, nargs: usize) -> ElleResult
         Err(e) => return e,
     };
 
-    let data_val = a.arg(args, nargs, 1);
+    let data_val = unsafe { a.arg(args, nargs, 1) };
     let new_data: Vec<u8> = if let Some(b) = a.get_bytes(data_val) {
         b.to_vec()
     } else {

@@ -102,7 +102,7 @@ fn event_to_value(ev: &WlEvent) -> ElleValue {
 
 extern "C" fn prim_connect(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let _ = a.args(args, nargs);
+    let _ = unsafe { a.args(args, nargs) };
 
     let conn = match Connection::connect_to_env() {
         Ok(c) => c,
@@ -135,7 +135,7 @@ extern "C" fn prim_connect(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_disconnect(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let args = a.args(args, nargs);
+    let args = unsafe { a.args(args, nargs) };
     if nargs != 1 {
         return a.err("arity-error", "wl/disconnect: expected 1 argument");
     }
@@ -149,7 +149,7 @@ extern "C" fn prim_display_fd(args: *const ElleValue, nargs: usize) -> ElleResul
     if nargs != 1 {
         return a.err("arity-error", "wl/display-fd: expected 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
         None => return a.err("type-error", "wl/display-fd: expected wayland connection"),
@@ -163,7 +163,7 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
     if nargs != 1 {
         return a.err("arity-error", "wl/dispatch: expected 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match unsafe { a.get_external_mut::<WlConn>(val, "wayland-connection") } {
         Some(w) => w,
         None => return a.err("type-error", "wl/dispatch: expected wayland connection"),
@@ -179,7 +179,7 @@ extern "C" fn prim_flush(args: *const ElleValue, nargs: usize) -> ElleResult {
     if nargs != 1 {
         return a.err("arity-error", "wl/flush: expected 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
         None => return a.err("type-error", "wl/flush: expected wayland connection"),
@@ -195,7 +195,7 @@ extern "C" fn prim_poll_events(args: *const ElleValue, nargs: usize) -> ElleResu
     if nargs != 1 {
         return a.err("arity-error", "wl/poll-events: expected 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match unsafe { a.get_external_mut::<WlConn>(val, "wayland-connection") } {
         Some(w) => w,
         None => return a.err("type-error", "wl/poll-events: expected wayland connection"),
@@ -211,7 +211,7 @@ extern "C" fn prim_outputs(args: *const ElleValue, nargs: usize) -> ElleResult {
     if nargs != 1 {
         return a.err("arity-error", "wl/outputs: expected 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
         None => return a.err("type-error", "wl/outputs: expected wayland connection"),
@@ -238,7 +238,7 @@ extern "C" fn prim_seats(args: *const ElleValue, nargs: usize) -> ElleResult {
     if nargs != 1 {
         return a.err("arity-error", "wl/seats: expected 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
         None => return a.err("type-error", "wl/seats: expected wayland connection"),
@@ -265,7 +265,7 @@ extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleRe
     if nargs < 1 {
         return a.err("arity-error", "wl/layer-surface: expected at least 1 argument");
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match unsafe { a.get_external_mut::<WlConn>(val, "wayland-connection") } {
         Some(w) => w,
         None => return a.err("type-error", "wl/layer-surface: expected wayland connection"),
@@ -328,12 +328,12 @@ extern "C" fn prim_shm_buffer(args: *const ElleValue, nargs: usize) -> ElleResul
     if nargs != 3 {
         return a.err("arity-error", "wl/shm-buffer: expected 3 arguments (conn, width, height)");
     }
-    let conn_val = a.arg(args, nargs, 0);
-    let width = match a.get_int(a.arg(args, nargs, 1)) {
+    let conn_val = unsafe { a.arg(args, nargs, 0) };
+    let width = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(w) => w as i32,
         None => return a.err("type-error", "wl/shm-buffer: width must be integer"),
     };
-    let height = match a.get_int(a.arg(args, nargs, 2)) {
+    let height = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(h) => h as i32,
         None => return a.err("type-error", "wl/shm-buffer: height must be integer"),
     };

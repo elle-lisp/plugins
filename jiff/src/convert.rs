@@ -6,7 +6,7 @@ use elle_plugin::{ElleResult, ElleValue};
 
 pub extern "C" fn prim_to_date(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     match as_jiff(val) {
         Some(JiffValue::Date(d)) => a.ok(jiff_val(JiffValue::Date(*d))),
         Some(JiffValue::DateTime(dt)) => a.ok(jiff_val(JiffValue::Date(dt.date()))),
@@ -18,7 +18,7 @@ pub extern "C" fn prim_to_date(args: *const ElleValue, nargs: usize) -> ElleResu
 
 pub extern "C" fn prim_to_time(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     match as_jiff(val) {
         Some(JiffValue::Time(t)) => a.ok(jiff_val(JiffValue::Time(*t))),
         Some(JiffValue::DateTime(dt)) => a.ok(jiff_val(JiffValue::Time(dt.time()))),
@@ -31,11 +31,11 @@ pub extern "C" fn prim_to_time(args: *const ElleValue, nargs: usize) -> ElleResu
 pub extern "C" fn prim_to_datetime(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     if nargs == 2 {
-        let d = match require_variant!(a.arg(args, nargs, 0), Date, "datetime/->datetime", "date") { Ok(d) => *d, Err(e) => return e };
-        let t = match require_variant!(a.arg(args, nargs, 1), Time, "datetime/->datetime", "time") { Ok(t) => *t, Err(e) => return e };
+        let d = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Date, "datetime/->datetime", "date") { Ok(d) => *d, Err(e) => return e };
+        let t = match require_variant!(unsafe { a.arg(args, nargs, 1) }, Time, "datetime/->datetime", "time") { Ok(t) => *t, Err(e) => return e };
         return a.ok(jiff_val(JiffValue::DateTime(d.to_datetime(t))));
     }
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     match as_jiff(val) {
         Some(JiffValue::DateTime(dt)) => a.ok(jiff_val(JiffValue::DateTime(*dt))),
         Some(JiffValue::Zoned(z)) => a.ok(jiff_val(JiffValue::DateTime(z.datetime()))),
@@ -47,7 +47,7 @@ pub extern "C" fn prim_to_datetime(args: *const ElleValue, nargs: usize) -> Elle
 
 pub extern "C" fn prim_to_timestamp(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     match as_jiff(val) {
         Some(JiffValue::Timestamp(ts)) => a.ok(jiff_val(JiffValue::Timestamp(*ts))),
         Some(JiffValue::Zoned(z)) => a.ok(jiff_val(JiffValue::Timestamp(z.timestamp()))),
@@ -58,8 +58,8 @@ pub extern "C" fn prim_to_timestamp(args: *const ElleValue, nargs: usize) -> Ell
 
 pub extern "C" fn prim_zoned_in_tz(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let z = match require_variant!(a.arg(args, nargs, 0), Zoned, "zoned/in-tz", "zoned") { Ok(z) => z, Err(e) => return e };
-    let tz_str = match require_string(a.arg(args, nargs, 1), "zoned/in-tz") { Ok(s) => s, Err(e) => return e };
+    let z = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Zoned, "zoned/in-tz", "zoned") { Ok(z) => z, Err(e) => return e };
+    let tz_str = match require_string(unsafe { a.arg(args, nargs, 1) }, "zoned/in-tz") { Ok(s) => s, Err(e) => return e };
     let tz = match jiff::tz::TimeZone::get(&tz_str) { Ok(tz) => tz, Err(e) => return jiff_err("zoned/in-tz", e) };
     let result = z.with_time_zone(tz);
     a.ok(jiff_val(JiffValue::Zoned(Box::new(result))))
@@ -67,7 +67,7 @@ pub extern "C" fn prim_zoned_in_tz(args: *const ElleValue, nargs: usize) -> Elle
 
 pub extern "C" fn prim_span_to_sd(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span/->signed-duration", "span") { Ok(s) => *s, Err(e) => return e };
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/->signed-duration", "span") { Ok(s) => *s, Err(e) => return e };
     match jiff::SignedDuration::try_from(s) {
         Ok(d) => a.ok(jiff_val(JiffValue::SignedDuration(d))),
         Err(e) => jiff_err("span/->signed-duration", e),
@@ -87,8 +87,8 @@ fn parse_unit(s: &str) -> Option<jiff::Unit> {
 
 pub extern "C" fn prim_temporal_round(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let jv = match require_jiff(a.arg(args, nargs, 0), "temporal/round") { Ok(jv) => jv.clone(), Err(e) => return e };
-    let opts = a.arg(args, nargs, 1);
+    let jv = match require_jiff(unsafe { a.arg(args, nargs, 0) }, "temporal/round") { Ok(jv) => jv.clone(), Err(e) => return e };
+    let opts = unsafe { a.arg(args, nargs, 1) };
     let unit_val = match struct_get_kw(opts, "unit") {
         Some(v) => v,
         None => return a.err("jiff-error", "temporal/round: opts must contain :unit keyword"),

@@ -61,7 +61,7 @@ fn ensure_provider() {
 
 fn get_tls_state<'a>(args: *const ElleValue, nargs: usize, idx: usize, name: &str) -> Result<&'a TlsState, ElleResult> {
     let a = api();
-    let v = a.arg(args, nargs, idx);
+    let v = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<TlsState>(v, "tls-state").ok_or_else(|| {
         a.err("type-error", &format!("{}: expected tls-state, got {}", name, a.type_name(v)))
     })
@@ -212,7 +212,7 @@ extern "C" fn prim_tls_client_state(args: *const ElleValue, nargs: usize) -> Ell
     let a = api();
     ensure_provider();
     let name = "tls/client-state";
-    let v0 = a.arg(args, nargs, 0);
+    let v0 = unsafe { a.arg(args, nargs, 0) };
     let hostname = match a.get_string(v0) {
         Some(s) if !s.is_empty() => s.to_string(),
         Some(_) => return tls_err(name, "hostname must not be empty"),
@@ -220,13 +220,13 @@ extern "C" fn prim_tls_client_state(args: *const ElleValue, nargs: usize) -> Ell
     };
 
     let no_verify = if nargs > 1 {
-        let opts = a.arg(args, nargs, 1);
+        let opts = unsafe { a.arg(args, nargs, 1) };
         let nv_val = a.get_struct_field(opts, "no-verify");
         a.get_bool(nv_val).unwrap_or(false)
     } else { false };
 
     let ca_file: Option<String> = if nargs > 1 {
-        let opts = a.arg(args, nargs, 1);
+        let opts = unsafe { a.arg(args, nargs, 1) };
         let cf_val = a.get_struct_field(opts, "ca-file");
         a.get_string(cf_val).map(|s| s.to_string())
     } else { None };
@@ -255,7 +255,7 @@ extern "C" fn prim_tls_process(args: *const ElleValue, nargs: usize) -> ElleResu
     let a = api();
     let name = "tls/process";
     let state = match get_tls_state(args, nargs, 0, name) { Ok(s) => s, Err(e) => return e };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let new_data = match a.get_bytes(v1) {
         Some(b) => b.to_vec(),
         None => return a.err("type-error", &format!("{}: expected bytes, got {}", name, a.type_name(v1))),
@@ -284,7 +284,7 @@ extern "C" fn prim_tls_read_plaintext(args: *const ElleValue, nargs: usize) -> E
     let a = api();
     let name = "tls/read-plaintext";
     let state = match get_tls_state(args, nargs, 0, name) { Ok(s) => s, Err(e) => return e };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let n = match a.get_int(v1) {
         Some(i) if i >= 0 => i as usize,
         Some(_) => return a.err("value-error", &format!("{}: n must be non-negative", name)),
@@ -300,7 +300,7 @@ extern "C" fn prim_tls_plaintext_indexof(args: *const ElleValue, nargs: usize) -
     let a = api();
     let name = "tls/plaintext-indexof";
     let state = match get_tls_state(args, nargs, 0, name) { Ok(s) => s, Err(e) => return e };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let byte_val = match a.get_int(v1) {
         Some(i) if (0..=255).contains(&i) => i as u8,
         Some(_) => return a.err("value-error", &format!("{}: byte must be 0-255", name)),
@@ -341,7 +341,7 @@ extern "C" fn prim_tls_write_plaintext(args: *const ElleValue, nargs: usize) -> 
         ]));
     }
 
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let data: Vec<u8> = if let Some(b) = a.get_bytes(v1) {
         b.to_vec()
     } else if let Some(s) = a.get_string(v1) {
@@ -434,9 +434,9 @@ extern "C" fn prim_tls_server_config(args: *const ElleValue, nargs: usize) -> El
     let a = api();
     ensure_provider();
     let name = "tls/server-config";
-    let v0 = a.arg(args, nargs, 0);
+    let v0 = unsafe { a.arg(args, nargs, 0) };
     let cert_path = match a.get_string(v0) { Some(s) => s.to_string(), None => return a.err("type-error", &format!("{}: expected string for cert-path, got {}", name, a.type_name(v0))) };
-    let v1 = a.arg(args, nargs, 1);
+    let v1 = unsafe { a.arg(args, nargs, 1) };
     let key_path = match a.get_string(v1) { Some(s) => s.to_string(), None => return a.err("type-error", &format!("{}: expected string for key-path, got {}", name, a.type_name(v1))) };
 
     let cert_data = match std::fs::read(&cert_path) { Ok(d) => d, Err(e) => return io_err(name, format!("reading cert-path '{}': {}", cert_path, e)) };
@@ -459,7 +459,7 @@ extern "C" fn prim_tls_server_state(args: *const ElleValue, nargs: usize) -> Ell
     let a = api();
     ensure_provider();
     let name = "tls/server-state";
-    let v0 = a.arg(args, nargs, 0);
+    let v0 = unsafe { a.arg(args, nargs, 0) };
     let server_config = match a.get_external::<TlsServerConfig>(v0, "tls-server-config") {
         Some(c) => c,
         None => return a.err("type-error", &format!("{}: expected tls-server-config, got {}", name, a.type_name(v0))),

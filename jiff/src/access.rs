@@ -11,7 +11,7 @@ macro_rules! date_accessor {
     ($fn_name:ident, $prim_name:expr, $method:ident) => {
         pub extern "C" fn $fn_name(args: *const ElleValue, nargs: usize) -> ElleResult {
             let a = crate::api();
-            let val = a.arg(args, nargs, 0);
+            let val = unsafe { a.arg(args, nargs, 0) };
             match as_jiff(val) {
                 Some(JiffValue::Date(d)) => a.ok(a.int(d.$method() as i64)),
                 Some(JiffValue::DateTime(dt)) => a.ok(a.int(dt.$method() as i64)),
@@ -29,7 +29,7 @@ date_accessor!(prim_date_day, "date/day", day);
 
 pub extern "C" fn prim_date_weekday(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wd = match as_jiff(val) {
         Some(JiffValue::Date(d)) => d.weekday(),
         Some(JiffValue::DateTime(dt)) => dt.weekday(),
@@ -51,7 +51,7 @@ pub extern "C" fn prim_date_weekday(args: *const ElleValue, nargs: usize) -> Ell
 
 pub extern "C" fn prim_date_weekday_number(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let wd = match as_jiff(val) {
         Some(JiffValue::Date(d)) => d.weekday(),
         Some(JiffValue::DateTime(dt)) => dt.weekday(),
@@ -66,7 +66,7 @@ macro_rules! date_method_accessor {
     ($fn_name:ident, $prim_name:expr, $method:ident) => {
         pub extern "C" fn $fn_name(args: *const ElleValue, nargs: usize) -> ElleResult {
             let a = crate::api();
-            let val = a.arg(args, nargs, 0);
+            let val = unsafe { a.arg(args, nargs, 0) };
             let n = match as_jiff(val) {
                 Some(JiffValue::Date(d)) => d.$method(),
                 Some(JiffValue::DateTime(dt)) => dt.date().$method(),
@@ -85,7 +85,7 @@ date_method_accessor!(prim_date_days_in_year, "date/days-in-year", days_in_year)
 
 pub extern "C" fn prim_date_leap_year(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let b = match as_jiff(val) {
         Some(JiffValue::Date(d)) => d.in_leap_year(),
         Some(JiffValue::DateTime(dt)) => dt.date().in_leap_year(),
@@ -104,7 +104,7 @@ macro_rules! time_accessor {
     ($fn_name:ident, $prim_name:expr, $method:ident) => {
         pub extern "C" fn $fn_name(args: *const ElleValue, nargs: usize) -> ElleResult {
             let a = crate::api();
-            let val = a.arg(args, nargs, 0);
+            let val = unsafe { a.arg(args, nargs, 0) };
             match as_jiff(val) {
                 Some(JiffValue::Time(t)) => a.ok(a.int(t.$method() as i64)),
                 Some(JiffValue::DateTime(dt)) => a.ok(a.int(dt.$method() as i64)),
@@ -130,7 +130,7 @@ time_accessor!(prim_time_subsec_nanosecond, "time/subsec-nanosecond", subsec_nan
 
 pub extern "C" fn prim_zoned_tz_name(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let z = match require_variant!(a.arg(args, nargs, 0), Zoned, "zoned/tz-name", "zoned") {
+    let z = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Zoned, "zoned/tz-name", "zoned") {
         Ok(z) => z,
         Err(e) => return e,
     };
@@ -139,7 +139,7 @@ pub extern "C" fn prim_zoned_tz_name(args: *const ElleValue, nargs: usize) -> El
 
 pub extern "C" fn prim_zoned_utc_offset(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let z = match require_variant!(a.arg(args, nargs, 0), Zoned, "zoned/utc-offset", "zoned") {
+    let z = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Zoned, "zoned/utc-offset", "zoned") {
         Ok(z) => z,
         Err(e) => return e,
     };
@@ -152,7 +152,7 @@ pub extern "C" fn prim_zoned_utc_offset(args: *const ElleValue, nargs: usize) ->
 
 pub extern "C" fn prim_sd_secs(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let d = match require_variant!(a.arg(args, nargs, 0), SignedDuration, "signed-duration/secs", "signed-duration") {
+    let d = match require_variant!(unsafe { a.arg(args, nargs, 0) }, SignedDuration, "signed-duration/secs", "signed-duration") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -161,7 +161,7 @@ pub extern "C" fn prim_sd_secs(args: *const ElleValue, nargs: usize) -> ElleResu
 
 pub extern "C" fn prim_sd_nanos(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let d = match require_variant!(a.arg(args, nargs, 0), SignedDuration, "signed-duration/nanos", "signed-duration") {
+    let d = match require_variant!(unsafe { a.arg(args, nargs, 0) }, SignedDuration, "signed-duration/nanos", "signed-duration") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -170,7 +170,7 @@ pub extern "C" fn prim_sd_nanos(args: *const ElleValue, nargs: usize) -> ElleRes
 
 pub extern "C" fn prim_sd_zero(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let d = match require_variant!(a.arg(args, nargs, 0), SignedDuration, "signed-duration/zero?", "signed-duration") {
+    let d = match require_variant!(unsafe { a.arg(args, nargs, 0) }, SignedDuration, "signed-duration/zero?", "signed-duration") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -183,11 +183,11 @@ pub extern "C" fn prim_sd_zero(args: *const ElleValue, nargs: usize) -> ElleResu
 
 pub extern "C" fn prim_span_get(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span/get", "span") {
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/get", "span") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let unit = match crate::require_keyword(a.arg(args, nargs, 1), "span/get") {
+    let unit = match crate::require_keyword(unsafe { a.arg(args, nargs, 1) }, "span/get") {
         Ok(k) => k,
         Err(e) => return e,
     };
@@ -209,7 +209,7 @@ pub extern "C" fn prim_span_get(args: *const ElleValue, nargs: usize) -> ElleRes
 
 pub extern "C" fn prim_span_zero(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span/zero?", "span") {
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span/zero?", "span") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -218,7 +218,7 @@ pub extern "C" fn prim_span_zero(args: *const ElleValue, nargs: usize) -> ElleRe
 
 pub extern "C" fn prim_span_to_struct(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let s = match require_variant!(a.arg(args, nargs, 0), Span, "span->struct", "span") {
+    let s = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Span, "span->struct", "span") {
         Ok(s) => s,
         Err(e) => return e,
     };

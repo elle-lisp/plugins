@@ -54,7 +54,7 @@ fn extract_float(val: ElleValue) -> Option<f64> {
 
 extern "C" fn prim_random_seed(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let seed = match a.get_int(arg0) {
         Some(n) => n as u64,
         None => {
@@ -74,7 +74,7 @@ extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResul
     let val = match nargs {
         0 => rng.random::<u64>() as i64,
         1 => {
-            let arg0 = a.arg(args, nargs, 0);
+            let arg0 = unsafe { a.arg(args, nargs, 0) };
             let max = match a.get_int(arg0) {
                 Some(n) => n,
                 None => {
@@ -90,8 +90,8 @@ extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResul
             rng.random_range(0..max)
         }
         2 => {
-            let arg0 = a.arg(args, nargs, 0);
-            let arg1 = a.arg(args, nargs, 1);
+            let arg0 = unsafe { a.arg(args, nargs, 0) };
+            let arg1 = unsafe { a.arg(args, nargs, 1) };
             let min = match a.get_int(arg0) {
                 Some(n) => n,
                 None => {
@@ -137,7 +137,7 @@ extern "C" fn prim_random_bool(_args: *const ElleValue, _nargs: usize) -> ElleRe
 
 extern "C" fn prim_random_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let len = match a.get_int(arg0) {
         Some(n) if n >= 0 => n as usize,
         Some(_) => {
@@ -157,7 +157,7 @@ extern "C" fn prim_random_bytes(args: *const ElleValue, nargs: usize) -> ElleRes
 
 extern "C" fn prim_random_shuffle(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let mut elements = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
@@ -176,7 +176,7 @@ extern "C" fn prim_random_shuffle(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_random_choice(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let elements = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
@@ -204,7 +204,7 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
     let (mean, stddev) = match nargs {
         0 => (0.0f64, 1.0f64),
         1 => {
-            let arg0 = a.arg(args, nargs, 0);
+            let arg0 = unsafe { a.arg(args, nargs, 0) };
             let m = match extract_float(arg0) {
                 Some(f) => f,
                 None => {
@@ -220,8 +220,8 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
             (m, 1.0f64)
         }
         2 => {
-            let arg0 = a.arg(args, nargs, 0);
-            let arg1 = a.arg(args, nargs, 1);
+            let arg0 = unsafe { a.arg(args, nargs, 0) };
+            let arg1 = unsafe { a.arg(args, nargs, 1) };
             let m = match extract_float(arg0) {
                 Some(f) => f,
                 None => {
@@ -272,7 +272,7 @@ extern "C" fn prim_random_exponential(args: *const ElleValue, nargs: usize) -> E
     let lambda = match nargs {
         0 => 1.0f64,
         1 => {
-            let arg0 = a.arg(args, nargs, 0);
+            let arg0 = unsafe { a.arg(args, nargs, 0) };
             match extract_float(arg0) {
                 Some(f) => f,
                 None => {
@@ -298,8 +298,8 @@ extern "C" fn prim_random_exponential(args: *const ElleValue, nargs: usize) -> E
 
 extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
-    let arg1 = a.arg(args, nargs, 1);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
+    let arg1 = unsafe { a.arg(args, nargs, 1) };
     let items = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
@@ -376,7 +376,7 @@ extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> Elle
 
 extern "C" fn prim_random_csprng_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     let len = match a.get_int(arg0) {
         Some(n) if n >= 0 => n as usize,
         Some(_) => {
@@ -402,7 +402,7 @@ extern "C" fn prim_random_csprng_bytes(args: *const ElleValue, nargs: usize) -> 
 
 extern "C" fn prim_random_csprng_seed(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
     // Extract bytes from bytes value
     let data: Vec<u8> = if let Some(b) = a.get_bytes(arg0) {
         b.to_vec()
@@ -432,8 +432,8 @@ extern "C" fn prim_random_csprng_seed(args: *const ElleValue, nargs: usize) -> E
 
 extern "C" fn prim_random_sample(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let arg0 = a.arg(args, nargs, 0);
-    let arg1 = a.arg(args, nargs, 1);
+    let arg0 = unsafe { a.arg(args, nargs, 0) };
+    let arg1 = unsafe { a.arg(args, nargs, 1) };
     let elements = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {

@@ -18,14 +18,14 @@ extern "C" fn prim_selkie_render(args: *const ElleValue, nargs: usize) -> ElleRe
             &format!("selkie/render: expected 1 argument, got {}", nargs),
         );
     }
-    let diagram = match a.get_string(a.arg(args, nargs, 0)) {
+    let diagram = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
                 "type-error",
                 &format!(
                     "selkie/render: expected string, got {}",
-                    a.type_name(a.arg(args, nargs, 0))
+                    a.type_name(unsafe { a.arg(args, nargs, 0) })
                 ),
             );
         }
@@ -53,26 +53,26 @@ extern "C" fn prim_selkie_render_to_file(args: *const ElleValue, nargs: usize) -
             ),
         );
     }
-    let diagram = match a.get_string(a.arg(args, nargs, 0)) {
+    let diagram = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
                 "type-error",
                 &format!(
                     "selkie/render-to-file: expected string, got {}",
-                    a.type_name(a.arg(args, nargs, 0))
+                    a.type_name(unsafe { a.arg(args, nargs, 0) })
                 ),
             );
         }
     };
-    let path = match a.get_string(a.arg(args, nargs, 1)) {
+    let path = match a.get_string(unsafe { a.arg(args, nargs, 1) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
                 "type-error",
                 &format!(
                     "selkie/render-to-file: expected string, got {}",
-                    a.type_name(a.arg(args, nargs, 1))
+                    a.type_name(unsafe { a.arg(args, nargs, 1) })
                 ),
             );
         }
@@ -112,14 +112,14 @@ extern "C" fn prim_selkie_render_ascii(args: *const ElleValue, nargs: usize) -> 
             ),
         );
     }
-    let diagram = match a.get_string(a.arg(args, nargs, 0)) {
+    let diagram = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
                 "type-error",
                 &format!(
                     "selkie/render-ascii: expected string, got {}",
-                    a.type_name(a.arg(args, nargs, 0))
+                    a.type_name(unsafe { a.arg(args, nargs, 0) })
                 ),
             );
         }

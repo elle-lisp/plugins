@@ -128,7 +128,7 @@ extern "C" fn prim_yaml_parse(args: *const ElleValue, nargs: usize) -> ElleResul
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
     }
-    let text = match a.get_string(a.arg(args, nargs, 0)) {
+    let text = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
@@ -136,7 +136,7 @@ extern "C" fn prim_yaml_parse(args: *const ElleValue, nargs: usize) -> ElleResul
                 &format!(
                     "{}: expected string, got {}",
                     name,
-                    a.type_name(a.arg(args, nargs, 0))
+                    a.type_name(unsafe { a.arg(args, nargs, 0) })
                 ),
             );
         }
@@ -159,7 +159,7 @@ extern "C" fn prim_yaml_parse_all(args: *const ElleValue, nargs: usize) -> ElleR
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
     }
-    let text = match a.get_string(a.arg(args, nargs, 0)) {
+    let text = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
             return a.err(
@@ -167,7 +167,7 @@ extern "C" fn prim_yaml_parse_all(args: *const ElleValue, nargs: usize) -> ElleR
                 &format!(
                     "{}: expected string, got {}",
                     name,
-                    a.type_name(a.arg(args, nargs, 0))
+                    a.type_name(unsafe { a.arg(args, nargs, 0) })
                 ),
             );
         }
@@ -199,7 +199,7 @@ extern "C" fn prim_yaml_encode(args: *const ElleValue, nargs: usize) -> ElleResu
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
     }
-    let yv = match value_to_yaml(a.arg(args, nargs, 0), name) {
+    let yv = match value_to_yaml(unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(v) => v,
         Err(e) => return e,
     };

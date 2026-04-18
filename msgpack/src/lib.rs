@@ -650,7 +650,7 @@ fn read_u32_be(rd: &mut &[u8]) -> Option<u32> {
 
 extern "C" fn prim_msgpack_encode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let mut buf = Vec::new();
     match encode_value(&mut buf, val, Mode::Interop) {
         Ok(()) => a.ok(a.bytes(&buf)),
@@ -660,7 +660,7 @@ extern "C" fn prim_msgpack_encode(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_msgpack_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let data = match a.get_bytes(val) {
         Some(b) => b.to_vec(),
         None => {
@@ -689,7 +689,7 @@ extern "C" fn prim_msgpack_decode(args: *const ElleValue, nargs: usize) -> ElleR
 
 extern "C" fn prim_msgpack_valid(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let data = match a.get_bytes(val) {
         Some(b) => b,
         None => return a.ok(a.boolean(false)),
@@ -707,7 +707,7 @@ extern "C" fn prim_msgpack_valid(args: *const ElleValue, nargs: usize) -> ElleRe
 
 extern "C" fn prim_msgpack_encode_tagged(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let mut buf = Vec::new();
     match encode_value(&mut buf, val, Mode::Tagged) {
         Ok(()) => a.ok(a.bytes(&buf)),
@@ -717,7 +717,7 @@ extern "C" fn prim_msgpack_encode_tagged(args: *const ElleValue, nargs: usize) -
 
 extern "C" fn prim_msgpack_decode_tagged(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     let data = match a.get_bytes(val) {
         Some(b) => b.to_vec(),
         None => {

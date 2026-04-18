@@ -5,7 +5,7 @@ use elle_plugin::{ElleResult, ElleValue};
 
 pub extern "C" fn prim_temporal_string(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let jv = match require_jiff(a.arg(args, nargs, 0), "temporal/string") { Ok(jv) => jv, Err(e) => return e };
+    let jv = match require_jiff(unsafe { a.arg(args, nargs, 0) }, "temporal/string") { Ok(jv) => jv, Err(e) => return e };
     let s: String = match jv {
         JiffValue::Timestamp(ts) => ts.to_string(),
         JiffValue::Date(d) => d.to_string(),
@@ -20,8 +20,8 @@ pub extern "C" fn prim_temporal_string(args: *const ElleValue, nargs: usize) -> 
 
 pub extern "C" fn prim_temporal_format(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let fmt = match require_string(a.arg(args, nargs, 0), "temporal/format") { Ok(s) => s, Err(e) => return e };
-    let jv = match require_jiff(a.arg(args, nargs, 1), "temporal/format") { Ok(jv) => jv, Err(e) => return e };
+    let fmt = match require_string(unsafe { a.arg(args, nargs, 0) }, "temporal/format") { Ok(s) => s, Err(e) => return e };
+    let jv = match require_jiff(unsafe { a.arg(args, nargs, 1) }, "temporal/format") { Ok(jv) => jv, Err(e) => return e };
     let result = match jv {
         JiffValue::Timestamp(ts) => jiff::fmt::strtime::format(&fmt, *ts),
         JiffValue::Date(d) => jiff::fmt::strtime::format(&fmt, *d),
@@ -38,27 +38,27 @@ pub extern "C" fn prim_temporal_format(args: *const ElleValue, nargs: usize) -> 
 
 pub extern "C" fn prim_ts_epoch(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ts = match require_variant!(a.arg(args, nargs, 0), Timestamp, "timestamp/->epoch", "timestamp") { Ok(ts) => ts, Err(e) => return e };
+    let ts = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Timestamp, "timestamp/->epoch", "timestamp") { Ok(ts) => ts, Err(e) => return e };
     a.ok(a.float(ts.as_second() as f64 + ts.subsec_nanosecond() as f64 / 1e9))
 }
 pub extern "C" fn prim_ts_epoch_millis(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ts = match require_variant!(a.arg(args, nargs, 0), Timestamp, "timestamp/->epoch-millis", "timestamp") { Ok(ts) => ts, Err(e) => return e };
+    let ts = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Timestamp, "timestamp/->epoch-millis", "timestamp") { Ok(ts) => ts, Err(e) => return e };
     a.ok(a.int(ts.as_millisecond()))
 }
 pub extern "C" fn prim_ts_epoch_micros(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ts = match require_variant!(a.arg(args, nargs, 0), Timestamp, "timestamp/->epoch-micros", "timestamp") { Ok(ts) => ts, Err(e) => return e };
+    let ts = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Timestamp, "timestamp/->epoch-micros", "timestamp") { Ok(ts) => ts, Err(e) => return e };
     a.ok(a.int(ts.as_microsecond()))
 }
 pub extern "C" fn prim_ts_epoch_nanos(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ts = match require_variant!(a.arg(args, nargs, 0), Timestamp, "timestamp/->epoch-nanos", "timestamp") { Ok(ts) => ts, Err(e) => return e };
+    let ts = match require_variant!(unsafe { a.arg(args, nargs, 0) }, Timestamp, "timestamp/->epoch-nanos", "timestamp") { Ok(ts) => ts, Err(e) => return e };
     a.ok(a.int(ts.as_nanosecond() as i64))
 }
 pub extern "C" fn prim_ts_from_epoch_seconds(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let val = a.arg(args, nargs, 0);
+    let val = unsafe { a.arg(args, nargs, 0) };
     if let Some(n) = a.get_int(val) {
         match jiff::Timestamp::new(n, 0) {
             Ok(ts) => return a.ok(jiff_val(JiffValue::Timestamp(ts))),
@@ -77,7 +77,7 @@ pub extern "C" fn prim_ts_from_epoch_seconds(args: *const ElleValue, nargs: usiz
 }
 pub extern "C" fn prim_ts_from_epoch_millis(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ms = match require_int(a.arg(args, nargs, 0), "timestamp/from-epoch-millis") { Ok(n) => n, Err(e) => return e };
+    let ms = match require_int(unsafe { a.arg(args, nargs, 0) }, "timestamp/from-epoch-millis") { Ok(n) => n, Err(e) => return e };
     match jiff::Timestamp::from_millisecond(ms) {
         Ok(ts) => a.ok(jiff_val(JiffValue::Timestamp(ts))),
         Err(e) => jiff_err("timestamp/from-epoch-millis", e),
@@ -85,7 +85,7 @@ pub extern "C" fn prim_ts_from_epoch_millis(args: *const ElleValue, nargs: usize
 }
 pub extern "C" fn prim_ts_from_epoch_micros(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let us = match require_int(a.arg(args, nargs, 0), "timestamp/from-epoch-micros") { Ok(n) => n, Err(e) => return e };
+    let us = match require_int(unsafe { a.arg(args, nargs, 0) }, "timestamp/from-epoch-micros") { Ok(n) => n, Err(e) => return e };
     match jiff::Timestamp::from_microsecond(us) {
         Ok(ts) => a.ok(jiff_val(JiffValue::Timestamp(ts))),
         Err(e) => jiff_err("timestamp/from-epoch-micros", e),
@@ -93,7 +93,7 @@ pub extern "C" fn prim_ts_from_epoch_micros(args: *const ElleValue, nargs: usize
 }
 pub extern "C" fn prim_ts_from_epoch_nanos(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
-    let ns = match require_int(a.arg(args, nargs, 0), "timestamp/from-epoch-nanos") { Ok(n) => n as i128, Err(e) => return e };
+    let ns = match require_int(unsafe { a.arg(args, nargs, 0) }, "timestamp/from-epoch-nanos") { Ok(n) => n as i128, Err(e) => return e };
     match jiff::Timestamp::from_nanosecond(ns) {
         Ok(ts) => a.ok(jiff_val(JiffValue::Timestamp(ts))),
         Err(e) => jiff_err("timestamp/from-epoch-nanos", e),

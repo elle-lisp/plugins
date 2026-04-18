@@ -73,7 +73,7 @@ fn compute_path(node: Node<'_>) -> Vec<usize> {
 
 fn get_string(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<String, ElleResult> {
     let a = api();
-    let val = a.arg(args, nargs, idx);
+    let val = unsafe { a.arg(args, nargs, idx) };
     a.get_string(val)
         .map(|s| s.to_string())
         .ok_or_else(|| a.err("type-error", &format!("{}: expected string, got {}", prim, a.type_name(val))))
@@ -81,7 +81,7 @@ fn get_string(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> R
 
 fn get_tree(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<Rc<TsTreeData>, ElleResult> {
     let a = api();
-    let val = a.arg(args, nargs, idx);
+    let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<Rc<TsTreeData>>(val, "ts/tree")
         .cloned()
         .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/tree, got {}", prim, a.type_name(val))))
@@ -89,21 +89,21 @@ fn get_tree(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Res
 
 fn get_node<'a>(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<&'a TsNodeData, ElleResult> {
     let a = api();
-    let val = a.arg(args, nargs, idx);
+    let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<TsNodeData>(val, "ts/node")
         .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/node, got {}", prim, a.type_name(val))))
 }
 
 fn get_query<'a>(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<&'a TsQueryData, ElleResult> {
     let a = api();
-    let val = a.arg(args, nargs, idx);
+    let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<TsQueryData>(val, "ts/query")
         .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/query, got {}", prim, a.type_name(val))))
 }
 
 fn get_language(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<Language, ElleResult> {
     let a = api();
-    let val = a.arg(args, nargs, idx);
+    let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<Language>(val, "ts/language")
         .cloned()
         .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/language, got {}", prim, a.type_name(val))))
