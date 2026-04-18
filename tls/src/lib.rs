@@ -77,10 +77,11 @@ fn io_err(name: &str, msg: impl std::fmt::Display) -> ElleResult {
 
 fn build_client_config(no_verify: bool, ca_file: Option<&str>) -> Result<Arc<ClientConfig>, String> {
     if no_verify {
-        let config = ClientConfig::builder()
+        let mut config = ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoVerifier))
             .with_no_client_auth();
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
         return Ok(Arc::new(config));
     }
     let mut root_store = RootCertStore::empty();
@@ -102,9 +103,10 @@ fn build_client_config(no_verify: bool, ca_file: Option<&str>) -> Result<Arc<Cli
             }
         }
     }
-    let config = ClientConfig::builder()
+    let mut config = ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(Arc::new(config))
 }
 
@@ -181,6 +183,8 @@ fn drive_state_machine(state: &TlsState, new_data: &[u8]) -> Result<&'static str
     let mut outgoing = state.outgoing.borrow_mut();
     let mut plaintext = state.plaintext.borrow_mut();
 
+    let mut last_kw = "ready";
+
     loop {
         macro_rules! one_round {
             ($raw_conn:expr) => {{
@@ -200,7 +204,19 @@ fn drive_state_machine(state: &TlsState, new_data: &[u8]) -> Result<&'static str
             TlsConnection::Client(c) => one_round!(c),
             TlsConnection::Server(s) => one_round!(s),
         };
-        if let Some(kw) = status { return Ok(kw); }
+        match status {
+            Some("has-data") => {
+                last_kw = "has-data";
+                // Rustls consumed our incoming bytes but may have buffered
+                // multiple records internally. Loop to drain them all.
+                continue;
+            }
+            // After draining all records, rustls returns to WriteTraffic
+            // ("ready"). If we previously got data, return "has-data".
+            Some("ready") if last_kw == "has-data" => return Ok("has-data"),
+            Some(kw) => return Ok(kw),
+            None => continue,
+        }
     }
 }
 
