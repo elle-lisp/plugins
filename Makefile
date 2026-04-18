@@ -21,8 +21,8 @@ CARGO := cargo build --release $(PATCH) $(TARGET_DIR)
 # optional deps (polars, arrow) are excluded from the default build.
 PORTABLE := -p elle-crypto -p elle-csv -p elle-hash -p elle-image \
             -p elle-jiff -p elle-mqtt -p elle-msgpack -p elle-oxigraph \
-            -p elle-protobuf -p elle-random -p elle-regex -p elle-selkie \
-            -p elle-svg -p elle-syn -p elle-tls -p elle-toml \
+            -p elle-plotters -p elle-protobuf -p elle-random -p elle-regex \
+            -p elle-selkie -p elle-svg -p elle-syn -p elle-tls -p elle-toml \
             -p elle-tree-sitter -p elle-xml -p elle-yaml
 
 # ── Targets ────────────────────────────────────────────────────────────

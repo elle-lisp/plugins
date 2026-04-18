@@ -68,6 +68,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | `mqtt/` | MQTT packet codec |
 | `msgpack/` | MessagePack serialization |
 | `oxigraph/` | RDF quad store with SPARQL |
+| `plotters/` | Data visualization (line, scatter, bar, area, histogram) |
 | `polars/` | Polars DataFrame operations |
 | `protobuf/` | Protocol Buffers |
 | `random/` | Random number generation |
@@ -110,6 +111,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | `mqtt/` | MQTT codec |
 | `msgpack/` | MessagePack |
 | `oxigraph/` | RDF store |
+| `plotters/` | Data visualization |
 | `polars/` | DataFrames |
 | `protobuf/` | Protocol Buffers |
 | `random/` | RNG |
