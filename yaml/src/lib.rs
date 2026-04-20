@@ -94,20 +94,14 @@ fn value_to_yaml(v: ElleValue, name: &str) -> Result<serde_yaml_ng::Value, ElleR
     }
     // Struct — keyword keys become YAML mapping string keys
     if a.check_struct(v) {
-        // We need to iterate struct fields. Use get_struct_field approach.
-        // The stable ABI doesn't expose iteration, but we can use the
-        // struct_get + we don't have iteration. Let's serialize through
-        // a different approach — actually, we need to think about this.
-        // The stable ABI only has struct_get by key name, not iteration.
-        // For serialization we need all keys. Let's return an error for now
-        // explaining the limitation... Actually, let me check if there's
-        // something we can use.
-        // We don't have struct iteration in the stable ABI. This is a
-        // fundamental limitation. We'll need to note this.
-        return Err(a.err(
-            "yaml-error",
-            &format!("{}: cannot encode struct as YAML (struct iteration not available in stable ABI)", name),
-        ));
+        let entries = a.struct_entries(v);
+        let mut map = serde_yaml_ng::Mapping::new();
+        for (key, field_val) in entries {
+            let yaml_key = serde_yaml_ng::Value::String(key.to_string());
+            let yaml_val = value_to_yaml(field_val, name)?;
+            map.insert(yaml_key, yaml_val);
+        }
+        return Ok(serde_yaml_ng::Value::Mapping(map));
     }
     Err(a.err(
         "yaml-error",

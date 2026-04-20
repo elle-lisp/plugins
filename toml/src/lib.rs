@@ -70,10 +70,12 @@ fn value_to_toml(v: ElleValue, name: &str) -> Result<toml::Value, ElleResult> {
     }
     // Struct — keyword keys become TOML table keys
     if a.check_struct(v) {
-        return Err(a.err(
-            "toml-error",
-            &format!("{}: cannot encode struct as TOML (struct iteration not available in stable ABI)", name),
-        ));
+        let entries = a.struct_entries(v);
+        let mut table = toml::map::Map::new();
+        for (key, val) in entries {
+            table.insert(key.to_string(), value_to_toml(val, name)?);
+        }
+        return Ok(toml::Value::Table(table));
     }
     // nil → explicit error (TOML has no null type)
     if a.check_nil(v) {

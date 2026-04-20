@@ -100,8 +100,8 @@ fn elle_to_pb(val: ElleValue, field: &FieldDescriptor) -> Result<PbValue, String
 
 /// Encode an Elle struct into a `DynamicMessage` for `msg_desc`.
 ///
-/// Uses the message descriptor's field list to know which fields to look up
-/// via struct_get (works with the stable ABI which doesn't expose iteration).
+/// Uses the message descriptor's field list to look up fields via struct_get.
+/// Map fields are encoded by iterating the struct's entries via `struct_entries`.
 fn encode_message(
     val: ElleValue,
     msg_desc: &prost_reflect::MessageDescriptor,
@@ -124,13 +124,8 @@ fn encode_message(
         }
 
         if field_desc.is_map() {
-            // Map fields can't be encoded via stable ABI (no struct iteration)
-            // We'll skip map fields that we can't iterate
-            // For now, return an error
-            return Err(format!(
-                "map field '{}' encoding requires struct iteration (not available in stable ABI)",
-                field_name
-            ));
+            let pb_map = encode_map(field_val, &field_desc)?;
+            msg.set_field(&field_desc, PbValue::Map(pb_map));
         } else if field_desc.is_list() {
             let pb_list = encode_repeated(field_val, &field_desc)?;
             msg.set_field(&field_desc, PbValue::List(pb_list));
@@ -170,6 +165,115 @@ fn encode_repeated(val: ElleValue, field: &FieldDescriptor) -> Result<Vec<PbValu
         };
         result.push(pb_val);
     }
+    Ok(result)
+}
+
+/// Encode an Elle struct into a protobuf map field.
+///
+/// Iterates the struct's key-value pairs via `struct_entries` and converts
+/// each pair into a `(MapKey, PbValue)` entry matching the map field's
+/// key/value types.
+fn encode_map(
+    val: ElleValue,
+    field: &FieldDescriptor,
+) -> Result<HashMap<MapKey, PbValue>, String> {
+    let a = crate::api();
+
+    if !a.check_struct(val) {
+        return Err(format!(
+            "field '{}': expected struct for map field, got {}",
+            field.name(),
+            a.type_name(val)
+        ));
+    }
+
+    let map_entry_desc = match field.kind() {
+        Kind::Message(d) => d,
+        _ => {
+            return Err(format!(
+                "field '{}': map field does not have message kind",
+                field.name()
+            ));
+        }
+    };
+
+    let key_field = map_entry_desc
+        .get_field_by_name("key")
+        .ok_or_else(|| format!("field '{}': map entry has no 'key' field", field.name()))?;
+    let value_field = map_entry_desc
+        .get_field_by_name("value")
+        .ok_or_else(|| format!("field '{}': map entry has no 'value' field", field.name()))?;
+
+    let entries = a.struct_entries(val);
+    let mut result = HashMap::with_capacity(entries.len());
+
+    for (key_str, entry_val) in entries {
+        let map_key = match key_field.kind() {
+            Kind::String => MapKey::String(key_str.to_string()),
+            Kind::Bool => {
+                let b = key_str.parse::<bool>().map_err(|_| {
+                    format!(
+                        "field '{}': cannot parse map key '{}' as bool",
+                        field.name(),
+                        key_str
+                    )
+                })?;
+                MapKey::Bool(b)
+            }
+            Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 => {
+                let n = key_str.parse::<i32>().map_err(|_| {
+                    format!(
+                        "field '{}': cannot parse map key '{}' as int32",
+                        field.name(),
+                        key_str
+                    )
+                })?;
+                MapKey::I32(n)
+            }
+            Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 => {
+                let n = key_str.parse::<i64>().map_err(|_| {
+                    format!(
+                        "field '{}': cannot parse map key '{}' as int64",
+                        field.name(),
+                        key_str
+                    )
+                })?;
+                MapKey::I64(n)
+            }
+            Kind::Uint32 | Kind::Fixed32 => {
+                let n = key_str.parse::<u32>().map_err(|_| {
+                    format!(
+                        "field '{}': cannot parse map key '{}' as uint32",
+                        field.name(),
+                        key_str
+                    )
+                })?;
+                MapKey::U32(n)
+            }
+            Kind::Uint64 | Kind::Fixed64 => {
+                let n = key_str.parse::<u64>().map_err(|_| {
+                    format!(
+                        "field '{}': cannot parse map key '{}' as uint64",
+                        field.name(),
+                        key_str
+                    )
+                })?;
+                MapKey::U64(n)
+            }
+            other => {
+                return Err(format!(
+                    "field '{}': unsupported map key kind {:?}",
+                    field.name(),
+                    other
+                ));
+            }
+        };
+
+        let pb_val = elle_to_pb(entry_val, &value_field)
+            .map_err(|e| format!("field '{}', key '{}': {}", field.name(), key_str, e))?;
+        result.insert(map_key, pb_val);
+    }
+
     Ok(result)
 }
 

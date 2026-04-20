@@ -81,23 +81,22 @@ fn encode_value(buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), Str
             encode_value(buf, elem, mode)?;
         }
     } else if a.check_struct(val) {
-        // For structs, we need to iterate fields. Use struct_get with known keys
-        // is not feasible since we don't know the keys. Instead, we'll use the
-        // opaque approach — structs in the new API are limited. We serialize
-        // what we can access via the API.
-        //
-        // NOTE: The stable ABI doesn't expose struct iteration. For now, we
-        // can't encode structs in the pure stable ABI. This is a limitation.
-        // We'll error on structs for now.
-        let prim_name = if mode == Mode::Tagged {
-            "encode-tagged"
-        } else {
-            "encode"
-        };
-        return Err(format!(
-            "msgpack/{}: struct encoding not supported in stable ABI plugin",
-            prim_name
-        ));
+        let entries = a.struct_entries(val);
+        rmp::encode::write_map_len(buf, entries.len() as u32).unwrap();
+        for (key, field_val) in entries {
+            match mode {
+                Mode::Interop => {
+                    rmp::encode::write_str(buf, key).unwrap();
+                }
+                Mode::Tagged => {
+                    let mut payload = Vec::new();
+                    rmp::encode::write_str(&mut payload, key).unwrap();
+                    rmp::encode::write_ext_meta(buf, payload.len() as u32, EXT_KEYWORD).unwrap();
+                    buf.extend_from_slice(&payload);
+                }
+            }
+            encode_value(buf, field_val, mode)?;
+        }
     } else {
         let prim_name = if mode == Mode::Tagged {
             "encode-tagged"

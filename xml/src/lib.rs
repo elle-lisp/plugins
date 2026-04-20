@@ -225,14 +225,22 @@ fn emit_element(
 
     let mut start = BytesStart::new(tag.as_str());
 
-    // Emit attributes — we can't iterate struct keys through the stable ABI,
-    // but for xml/emit the attrs struct was built by xml/parse, so we know
-    // the keys. However, without iteration, we can't emit arbitrary attrs.
-    // The stable ABI doesn't expose struct iteration yet.
-    // For now, we skip attribute emission from opaque structs.
-    // (Attributes will be empty unless the host adds iteration support.)
-    let _ = attrs_val;
-    let _ = &mut start;
+    // Emit attributes by iterating struct entries
+    if a.check_struct(attrs_val) {
+        for (key, field_val) in a.struct_entries(attrs_val) {
+            let val_str = match a.get_string(field_val) {
+                Some(s) => s.to_string(),
+                None => {
+                    return Err(format!(
+                        "xml/emit: attribute '{}' value must be a string, got {}",
+                        key,
+                        a.type_name(field_val)
+                    ));
+                }
+            };
+            start.push_attribute((key, val_str.as_str()));
+        }
+    }
 
     if children_len == 0 {
         writer
