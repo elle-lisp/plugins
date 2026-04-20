@@ -1467,6 +1467,7 @@ dependencies = [
 [[package]]
 name = "elle-plugin"
 version = "1.0.0"
+source = "git+https://github.com/elle-lisp/elle?branch=main#1d1138402fe5b50dd291b479ac7da3ff870d739a"
 
 [[package]]
 name = "elle-polars"

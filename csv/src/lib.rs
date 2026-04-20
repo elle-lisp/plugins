@@ -218,11 +218,13 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
         Err(e) => return e,
     };
 
-    // We can't iterate struct keys through the stable ABI.
-    // csv/write requires knowing the header keys from the first struct.
-    // This is a fundamental limitation — the stable ABI doesn't expose
-    // struct iteration.
+    let mut out: Vec<u8> = Vec::new();
+    let mut wtr = csv::WriterBuilder::new()
+        .delimiter(delim)
+        .from_writer(&mut out);
+
     if row_count > 0 {
+        // Extract headers from the first struct
         let first = a.get_array_item(rows_val, 0);
         if !a.check_struct(first) {
             return a.err(
@@ -234,17 +236,37 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
                 ),
             );
         }
-        return a.err(
-            "csv-error",
-            &format!("{}: cannot serialize structs (struct iteration not available in stable ABI)", name),
-        );
+        let entries = a.struct_entries(first);
+        let headers: Vec<&str> = entries.iter().map(|(k, _)| *k).collect();
+
+        // Write header row
+        if let Err(e) = wtr.write_record(&headers) {
+            return a.err("csv-error", &format!("{}: {}", name, e));
+        }
+
+        // Write each row using the same key order
+        for i in 0..row_count {
+            let row = a.get_array_item(rows_val, i);
+            if !a.check_struct(row) {
+                return a.err(
+                    "type-error",
+                    &format!(
+                        "{}: each row must be a struct, got {}",
+                        name,
+                        a.type_name(row)
+                    ),
+                );
+            }
+            let fields: Vec<String> = headers
+                .iter()
+                .map(|h| value_to_csv_field(a.get_struct_field(row, h)))
+                .collect();
+            if let Err(e) = wtr.write_record(&fields) {
+                return a.err("csv-error", &format!("{}: {}", name, e));
+            }
+        }
     }
 
-    // Empty array → empty CSV
-    let mut out: Vec<u8> = Vec::new();
-    let wtr = csv::WriterBuilder::new()
-        .delimiter(delim)
-        .from_writer(&mut out);
     drop(wtr);
     let s = match String::from_utf8(out) {
         Ok(s) => s,
