@@ -1,3 +1,4 @@
+(elle/epoch 8)
 
 ## Crypto plugin integration tests
 ## Tests the crypto plugin (.so loaded via import-file)

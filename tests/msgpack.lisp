@@ -1,3 +1,4 @@
+(elle/epoch 6)
 
 ## MessagePack plugin integration tests
 
@@ -45,12 +46,12 @@
 
 (assert (= (decode-fn (encode-fn -1.5)) -1.5) "float -1.5 round-trips")
 
-(assert (= (decode-fn (encode-fn (float "inf"))) (float "inf")) "float +infinity round-trips")
+(assert (= (decode-fn (encode-fn (parse-float "inf"))) (parse-float "inf")) "float +infinity round-trips")
 
-(assert (= (decode-fn (encode-fn (float "-inf"))) (float "-inf")) "float -infinity round-trips")
+(assert (= (decode-fn (encode-fn (parse-float "-inf"))) (parse-float "-inf")) "float -infinity round-trips")
 
 ## NaN: Elle = treats NaN as equal to itself (structural equality); assert-eq works
-(assert (= (decode-fn (encode-fn (float "nan"))) (float "nan")) "NaN round-trips as NaN")
+(assert (= (decode-fn (encode-fn (parse-float "nan"))) (parse-float "nan")) "NaN round-trips as NaN")
 
 (assert (= (decode-fn (encode-fn "")) "") "empty string round-trips")
 
@@ -109,12 +110,12 @@
 (assert (= (decode-tagged-fn (encode-tagged-fn ())) ()) "empty list round-trips via tagged mode")
 
 ## struct with keyword keys: keyword keys preserved in tagged mode
-(let ((v (decode-tagged-fn (encode-tagged-fn {:x 1 :y 2}))))
+(let [(v (decode-tagged-fn (encode-tagged-fn {:x 1 :y 2})))]
   (assert (has-key? v :x) "keyword key :x preserved in tagged round-trip")
   (assert (= (get v :x) 1) "value at :x preserved in tagged round-trip"))
 
 ## complex nested structure
-(let ((orig {:items (list :a :b) :count 2}))
+(let [(orig {:items (list :a :b) :count 2})]
   (assert (= (decode-tagged-fn (encode-tagged-fn orig)) orig) "nested struct with keyword keys and list round-trips via tagged mode"))
 
 ## shared types work identically in both modes
@@ -134,7 +135,7 @@
 (assert (= (decode-tagged-fn (encode-fn [1 2 3])) [1 2 3]) "decode-tagged handles interop-encoded array")
 
 ## decode (interop) on tagged-encoded bytes with ext → error
-(let (([ok? _] (protect ((fn () (decode-fn (encode-tagged-fn :foo))))))) (assert (not ok?) "interop decode on tagged keyword bytes gives error"))
+(let [([ok? _] (protect ((fn () (decode-fn (encode-tagged-fn :foo))))))] (assert (not ok?) "interop decode on tagged keyword bytes gives error"))
 
 # ── valid? tests ─────────────────────────────────────────────────────
 
@@ -154,15 +155,15 @@
 
 # ── Error tests ───────────────────────────────────────────────────────
 
-(let (([ok? _] (protect ((fn () (encode-fn (fn () 42))))))) (assert (not ok?) "encoding a closure is an error"))
+(let [([ok? _] (protect ((fn () (encode-fn (fn () 42))))))] (assert (not ok?) "encoding a closure is an error"))
 
 ## Improper list: (cons 1 2) has non-list cdr
-(let (([ok? _] (protect ((fn () (encode-fn (cons 1 2))))))) (assert (not ok?) "encoding an improper list is an error"))
+(let [([ok? _] (protect ((fn () (encode-fn (cons 1 2))))))] (assert (not ok?) "encoding an improper list is an error"))
 
-(let (([ok? err] (protect ((fn () (decode-fn "not bytes")))))) (assert (not ok?) "decode with string input gives type-error") (assert (= (get err :error) :type-error) "decode with string input gives type-error"))
+(let [([ok? err] (protect ((fn () (decode-fn "not bytes")))))] (assert (not ok?) "decode with string input gives type-error") (assert (= (get err :error) :type-error) "decode with string input gives type-error"))
 
-(let (([ok? _] (protect ((fn () (decode-fn (bytes 0xc1))))))) (assert (not ok?) "decode with reserved marker gives error"))
+(let [([ok? _] (protect ((fn () (decode-fn (bytes 0xc1))))))] (assert (not ok?) "decode with reserved marker gives error"))
 
-(let (([ok? _] (protect ((fn () (decode-fn (bytes))))))) (assert (not ok?) "decode with empty bytes gives error"))
+(let [([ok? _] (protect ((fn () (decode-fn (bytes))))))] (assert (not ok?) "decode with empty bytes gives error"))
 
-(let (([ok? _] (protect ((fn () (decode-fn (bytes 0x92 0x01))))))) (assert (not ok?) "decode with truncated array gives error"))
+(let [([ok? _] (protect ((fn () (decode-fn (bytes 0x92 0x01))))))] (assert (not ok?) "decode with truncated array gives error"))

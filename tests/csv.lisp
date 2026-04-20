@@ -1,3 +1,4 @@
+(elle/epoch 8)
 
 ## CSV plugin integration tests
 
@@ -113,14 +114,14 @@
 
 ## ── error cases ─────────────────────────────────────────────────
 
-(let ([ok? _] (protect ((fn () (parse-fn 42))))) (assert (not ok?) "csv/parse wrong type"))
+(let [[ok? _] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "csv/parse wrong type"))
 
-(let ([ok? _] (protect ((fn () (parse-rows-fn 42))))) (assert (not ok?) "csv/parse-rows wrong type"))
+(let [[ok? _] (protect ((fn () (parse-rows-fn 42))))] (assert (not ok?) "csv/parse-rows wrong type"))
 
-(let ([ok? _] (protect ((fn () (write-fn 42))))) (assert (not ok?) "csv/write non-array"))
+(let [[ok? _] (protect ((fn () (write-fn 42))))] (assert (not ok?) "csv/write non-array"))
 
-(let ([ok? _] (protect ((fn () (write-rows-fn 42))))) (assert (not ok?) "csv/write-rows non-array"))
+(let [[ok? _] (protect ((fn () (write-rows-fn 42))))] (assert (not ok?) "csv/write-rows non-array"))
 
-(let ([ok? _] (protect ((fn () (write-fn ["not-a-struct"]))))) (assert (not ok?) "csv/write non-struct row"))
+(let [[ok? _] (protect ((fn () (write-fn ["not-a-struct"]))))] (assert (not ok?) "csv/write non-struct row"))
 
-(let ([ok? _] (protect ((fn () (write-rows-fn ["not-an-array"]))))) (assert (not ok?) "csv/write-rows non-array row"))
+(let [[ok? _] (protect ((fn () (write-rows-fn ["not-an-array"]))))] (assert (not ok?) "csv/write-rows non-array row"))

@@ -1,8 +1,8 @@
 #!/usr/bin/env elle
+(elle/epoch 8)
 
 ## Test suite for plotters plugin
 
-(elle/epoch 1)
 
 (def [ok? plt] (protect (import "plugin/plotters")))
 (when (not ok?)
