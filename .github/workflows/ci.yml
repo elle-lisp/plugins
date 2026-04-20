@@ -61,7 +61,7 @@ jobs:
       - name: Install libclang
         run: |
           sudo apt-get update
-          sudo apt-get install -y libclang-dev llvm-dev clang
+          sudo apt-get install -y libclang-dev llvm-dev clang libfontconfig1-dev
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
       - name: Build
         run: cargo build --release -p elle-${{ matrix.plugin }}
@@ -118,7 +118,7 @@ jobs:
       - name: Install libclang
         run: |
           sudo apt-get update
-          sudo apt-get install -y libclang-dev llvm-dev clang
+          sudo apt-get install -y libclang-dev llvm-dev clang libfontconfig1-dev
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
