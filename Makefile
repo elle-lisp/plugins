@@ -4,18 +4,16 @@
 
 # ── Paths ──────────────────────────────────────────────────────────────
 
-# When used as a submodule, elle-plugin lives one level up.
+# When used as a submodule, share the target directory with the parent.
 ELLE_PLUGIN := $(wildcard ../elle-plugin/Cargo.toml)
 
 ifdef ELLE_PLUGIN
-  PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="../elle-plugin"'
   TARGET_DIR := --target-dir ../target
 else
-  PATCH :=
   TARGET_DIR :=
 endif
 
-CARGO := cargo build --release $(PATCH) $(TARGET_DIR)
+CARGO := cargo build --release $(TARGET_DIR)
 
 # Plugins that need system libraries (vulkan, wayland, egui) or heavy
 # optional deps (polars, arrow) are excluded from the default build.

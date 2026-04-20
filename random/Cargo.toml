@@ -7,6 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+elle-plugin.workspace = true
 rand = "0.9"
 rand_chacha = "0.9"

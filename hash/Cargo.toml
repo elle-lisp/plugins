@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
+elle-plugin.workspace = true
 
 # Cryptographic hashes (RustCrypto)
 digest = "0.10"

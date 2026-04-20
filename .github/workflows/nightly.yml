@@ -43,6 +43,12 @@ jobs:
           - yaml
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch elle-plugin (HEAD)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/elle-lisp/elle /tmp/elle
+          (cd /tmp/elle && git sparse-checkout set elle-plugin)
+          ln -s /tmp/elle/elle-plugin ../elle-plugin
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install libclang
@@ -50,13 +56,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libclang-dev llvm-dev clang
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
-      - name: Override elle-plugin to HEAD
-        run: |
-          mkdir -p .cargo
-          cat >> .cargo/config.toml << 'EOF'
-          [patch."https://github.com/elle-lisp/elle"]
-          elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
-          EOF
       - name: Build
         run: cargo build --release -p elle-${{ matrix.plugin }}
 
@@ -66,6 +65,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch elle (HEAD)
+        run: |
+          git clone --depth 1 https://github.com/elle-lisp/elle /tmp/elle
+          ln -s /tmp/elle/elle-plugin ../elle-plugin
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install GNU parallel and libclang
@@ -73,18 +76,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y parallel libclang-dev llvm-dev clang
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
-      - name: Override elle-plugin to HEAD
-        run: |
-          mkdir -p .cargo
-          cat >> .cargo/config.toml << 'EOF'
-          [patch."https://github.com/elle-lisp/elle"]
-          elle-plugin = { git = "https://github.com/elle-lisp/elle", branch = "main" }
-          EOF
       - name: Build all plugins
         run: cargo build --release
       - name: Build elle
         run: |
-          git clone --depth 1 https://github.com/elle-lisp/elle /tmp/elle
           cd /tmp/elle && cargo build --release -p elle
           echo "/tmp/elle/target/release" >> "$GITHUB_PATH"
       - name: Copy plugin .so files

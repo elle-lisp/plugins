@@ -48,6 +48,12 @@ jobs:
           - yaml
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch elle-plugin
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/elle-lisp/elle /tmp/elle
+          (cd /tmp/elle && git sparse-checkout set elle-plugin)
+          ln -s /tmp/elle/elle-plugin ../elle-plugin
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -99,6 +105,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch elle-plugin
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/elle-lisp/elle /tmp/elle
+          (cd /tmp/elle && git sparse-checkout set elle-plugin)
+          ln -s /tmp/elle/elle-plugin ../elle-plugin
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
