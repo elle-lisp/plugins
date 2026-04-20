@@ -7,7 +7,7 @@ use context::GpuCtx;
 use dispatch::{BufferSpec, BufferUsage, DispatchBuffer, GpuBuffer, GpuHandle};
 use shader::GpuShader;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_IO, SIG_YIELD};
 
 elle_plugin::define_plugin!("vulkan/", &PRIMITIVES);
 
@@ -325,7 +325,7 @@ fn parse_buffer_spec(
     })?;
 
     let dtype = struct_get(val, "dtype")
-        .and_then(|v| extract_keyword(v))
+        .and_then(extract_keyword)
         .unwrap_or_else(|| "f32".to_string());
 
     let elem_size = if dtype == "i64" { 8 } else { 4 };

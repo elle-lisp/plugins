@@ -372,20 +372,20 @@ impl HasherState {
                 a.bytes(&r.to_be_bytes())
             }
             // All Digest types: finalize_reset returns GenericArray -> to_vec
-            Self::Md5(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha1(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha224(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha256(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha384(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha512(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha512_224(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha512_256(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha3_224(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha3_256(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha3_384(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Sha3_512(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Blake2b512(h) => a.bytes(&h.finalize_reset().to_vec()),
-            Self::Blake2s256(h) => a.bytes(&h.finalize_reset().to_vec()),
+            Self::Md5(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha1(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha224(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha256(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha384(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha512(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha512_224(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha512_256(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha3_224(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha3_256(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha3_384(h) => a.bytes(&h.finalize_reset()),
+            Self::Sha3_512(h) => a.bytes(&h.finalize_reset()),
+            Self::Blake2b512(h) => a.bytes(&h.finalize_reset()),
+            Self::Blake2s256(h) => a.bytes(&h.finalize_reset()),
         }
     }
 }

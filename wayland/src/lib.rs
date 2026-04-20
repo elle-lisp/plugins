@@ -277,7 +277,7 @@ extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleRe
     };
 
     let qh = wl.queue.handle();
-    let surface = compositor.create_surface(&qh, ());
+    let _surface = compositor.create_surface(&qh, ());
 
     // Bind layer shell — we need this global
     // For now, return error if layer-shell is not available

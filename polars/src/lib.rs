@@ -4,7 +4,7 @@ use std::io::Cursor;
 
 use polars::prelude::*;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("polars/", &PRIMITIVES);
 
@@ -579,8 +579,8 @@ extern "C" fn prim_lsort(args: *const ElleValue, nargs: usize) -> ElleResult {
 
 extern "C" fn prim_lgroupby(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/lgroupby") { Ok(l) => l, Err(e) => return e };
-    let group_cols = match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/lgroupby") { Ok(c) => c, Err(e) => return e };
+    let _lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/lgroupby") { Ok(l) => l, Err(e) => return e };
+    let _group_cols = match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/lgroupby") { Ok(c) => c, Err(e) => return e };
 
     // Parse aggregation specs from the struct - we need to access struct fields by known keys
     // Since we can't iterate struct fields, lgroupby needs aggs passed differently.
@@ -590,7 +590,7 @@ extern "C" fn prim_lgroupby(args: *const ElleValue, nargs: usize) -> ElleResult 
         return a.err("type-error", "polars/lgroupby: aggs must be a struct");
     }
     // Struct iteration not available in stable ABI - return error
-    return a.err("polars-error", "polars/lgroupby: struct iteration not supported in stable ABI; use polars/read-csv + polars/collect pipeline instead");
+    a.err("polars-error", "polars/lgroupby: struct iteration not supported in stable ABI; use polars/read-csv + polars/collect pipeline instead")
 }
 
 extern "C" fn prim_ljoin(args: *const ElleValue, nargs: usize) -> ElleResult {

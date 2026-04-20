@@ -166,20 +166,17 @@ impl Dispatch<wl_output::WlOutput, ()> for WaylandState {
                 }
             }
             wl_output::Event::Mode {
-                flags,
+                flags: WEnum::Value(flags),
                 width,
                 height,
                 ..
-            } => {
-                if let WEnum::Value(flags) = flags {
-                    if flags.contains(wl_output::Mode::Current) {
-                        if let Some(info) = state.outputs.last_mut() {
-                            info.width = width;
-                            info.height = height;
-                        }
-                    }
+            } if flags.contains(wl_output::Mode::Current) => {
+                if let Some(info) = state.outputs.last_mut() {
+                    info.width = width;
+                    info.height = height;
                 }
             }
+            wl_output::Event::Mode { .. } => {}
             wl_output::Event::Scale { factor } => {
                 if let Some(info) = state.outputs.last_mut() {
                     info.scale = factor;

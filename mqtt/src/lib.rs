@@ -158,7 +158,7 @@ fn packet_to_value(packet: &Packet) -> ElleValue {
             a.build_struct(&[
                 ("type", a.keyword("publish")),
                 ("topic", a.string(p.topic.as_str())),
-                ("payload", a.bytes(&p.payload.to_vec())),
+                ("payload", a.bytes(&p.payload)),
                 ("qos", a.int(qos_to_int(p.qos))),
                 ("retain", a.boolean(p.retain)),
                 ("packet-id", packet_id),

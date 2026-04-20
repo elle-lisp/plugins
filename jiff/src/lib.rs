@@ -1,4 +1,5 @@
 //! Elle jiff plugin — date/time support via the `jiff` crate.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
 

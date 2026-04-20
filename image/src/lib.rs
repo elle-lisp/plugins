@@ -97,12 +97,12 @@ pub fn extract_color(val: ElleValue, name: &str) -> Result<image::Rgba<u8>, Elle
         return Err(a.err("value-error", &format!("{}: color array must have 4 elements, got {}", name, len)));
     }
     let mut rgba = [0u8; 4];
-    for i in 0..4 {
+    for (i, slot) in rgba.iter_mut().enumerate() {
         let v = a.get_array_item(val, i);
         let n = a.get_int(v).ok_or_else(|| {
             a.err("type-error", &format!("{}: color component must be int, got {}", name, a.type_name(v)))
         })?;
-        rgba[i] = n.clamp(0, 255) as u8;
+        *slot = n.clamp(0, 255) as u8;
     }
     Ok(image::Rgba(rgba))
 }
