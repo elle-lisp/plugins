@@ -56,8 +56,10 @@ extern "C" fn prim_open(args: *const ElleValue, nargs: usize) -> ElleResult {
 extern "C" fn prim_display_fd(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
-    let fd = state.borrow().display_fd;
-    a.ok(a.int(fd as i64))
+    match state.borrow().display_fd {
+        Some(fd) => a.ok(a.int(fd as i64)),
+        None => a.ok(a.nil()),
+    }
 }
 
 extern "C" fn prim_frame(args: *const ElleValue, nargs: usize) -> ElleResult {

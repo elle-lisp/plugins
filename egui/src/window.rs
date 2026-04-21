@@ -28,7 +28,7 @@ pub struct WindowState {
     pub egui_ctx: egui::Context,
     pub egui_winit: Option<egui_winit::State>,
     pub painter: Option<egui_glow::Painter>,
-    pub display_fd: RawFd,
+    pub display_fd: Option<RawFd>,
     pub widget_state: WidgetState,
     pub close_requested: bool,
 }
@@ -147,8 +147,9 @@ impl WindowState {
         let painter = egui_glow::Painter::new(Arc::clone(&gl), "", None, false)
             .map_err(|e| format!("failed to create painter: {}", e))?;
 
-        // Extract display fd
-        let display_fd = get_display_fd(&window)?;
+        // Extract display fd for ev/poll-fd event waiting.
+        // None on macOS (AppKit has no display fd; Elle polls with a timer).
+        let display_fd = get_display_fd(&window);
 
         Ok(WindowState {
             event_loop: Some(event_loop),
@@ -188,6 +189,13 @@ impl WindowState {
 
         let raw_input = egui_winit.take_egui_input(window);
         let size = window.inner_size();
+
+        // Resize the GL surface to match the current window dimensions.
+        gl_surface.resize(
+            gl_context,
+            NonZeroU32::new(size.width.max(1)).unwrap(),
+            NonZeroU32::new(size.height.max(1)).unwrap(),
+        );
         ix.width = size.width as f32;
         ix.height = size.height as f32;
         ix.closed = self.close_requested;
@@ -235,38 +243,37 @@ unsafe fn resolve_fn(lib: &str, name: &str) -> Result<*mut std::ffi::c_void, Str
     Ok(sym)
 }
 
-/// Extract the X11/Wayland display connection fd.
-fn get_display_fd(window: &Window) -> Result<RawFd, String> {
+/// Extract the display connection fd, if the backend exposes one.
+/// Returns None on macOS (AppKit has no pollable display fd).
+fn get_display_fd(window: &Window) -> Option<RawFd> {
     use raw_window_handle::RawDisplayHandle;
 
-    let handle = window
-        .display_handle()
-        .map_err(|e| format!("display handle error: {}", e))?;
+    let handle = window.display_handle().ok()?;
 
     match handle.as_raw() {
         RawDisplayHandle::Xlib(h) => {
-            let display = h.display.ok_or("Xlib display is null")?;
+            let display = h.display?;
             type XConnectionNumberFn =
                 unsafe extern "C" fn(*mut std::ffi::c_void) -> std::ffi::c_int;
             let func: XConnectionNumberFn =
-                unsafe { std::mem::transmute(resolve_fn("libX11.so.6", "XConnectionNumber")?) };
-            Ok(unsafe { func(display.as_ptr()) })
+                unsafe { std::mem::transmute(resolve_fn("libX11.so.6", "XConnectionNumber").ok()?) };
+            Some(unsafe { func(display.as_ptr()) })
         }
         RawDisplayHandle::Xcb(h) => {
-            let conn = h.connection.ok_or("XCB connection is null")?;
+            let conn = h.connection?;
             type XcbGetFdFn = unsafe extern "C" fn(*mut std::ffi::c_void) -> std::ffi::c_int;
             let func: XcbGetFdFn = unsafe {
-                std::mem::transmute(resolve_fn("libxcb.so.1", "xcb_get_file_descriptor")?)
+                std::mem::transmute(resolve_fn("libxcb.so.1", "xcb_get_file_descriptor").ok()?)
             };
-            Ok(unsafe { func(conn.as_ptr()) })
+            Some(unsafe { func(conn.as_ptr()) })
         }
         RawDisplayHandle::Wayland(h) => {
             type WlDisplayGetFdFn = unsafe extern "C" fn(*mut std::ffi::c_void) -> std::ffi::c_int;
             let func: WlDisplayGetFdFn = unsafe {
-                std::mem::transmute(resolve_fn("libwayland-client.so.0", "wl_display_get_fd")?)
+                std::mem::transmute(resolve_fn("libwayland-client.so.0", "wl_display_get_fd").ok()?)
             };
-            Ok(unsafe { func(h.display.as_ptr()) })
+            Some(unsafe { func(h.display.as_ptr()) })
         }
-        _ => Err("unsupported display backend (not X11 or Wayland)".into()),
+        _ => None,
     }
 }
