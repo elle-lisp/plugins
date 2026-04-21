@@ -8,12 +8,35 @@ independently from elle and loaded at runtime without version matching.
 
 ## Building
 
-```bash
-# All plugins
-cargo build --release
+### As a submodule of elle (recommended)
 
-# Single plugin
-cargo build --release -p elle-crypto
+This repo is available as a git submodule at `plugins/` in the elle repo.
+From the elle root:
+
+```bash
+git submodule update --init plugins
+make plugins          # portable plugins (no system deps)
+make plugins-all      # all plugins (requires vulkan, wayland, egui libs)
+```
+
+This places `.so` files in elle's `target/release/`, where the `plugin/`
+import prefix looks. You can also use `make` directly from the submodule
+directory — the Makefile detects the parent elle repo and sets
+`--target-dir` automatically.
+
+### Standalone
+
+```bash
+cargo build --release                    # all plugins
+cargo build --release -p elle-crypto     # single plugin
+```
+
+When built standalone, `.so` files land in `target/release/` within this
+repo. Elle won't find them via the `plugin/` prefix unless you either
+move them to elle's `target/release/` or point elle at them:
+
+```bash
+elle --path=/path/to/plugins/target/release
 ```
 
 ## Plugins
