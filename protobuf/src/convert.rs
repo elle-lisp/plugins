@@ -142,17 +142,23 @@ fn encode_message(
 /// Encode an Elle array into a repeated protobuf list.
 fn encode_repeated(val: ElleValue, field: &FieldDescriptor) -> Result<Vec<PbValue>, String> {
     let a = crate::api();
-    let arr_len = a.get_array_len(val).ok_or_else(|| {
-        format!(
-            "field '{}': expected array for repeated field, got {}",
+    // Accept arrays directly, or convert lists (cons chains) to arrays.
+    let (arr, arr_len) = if let Some(len) = a.get_array_len(val) {
+        (val, len)
+    } else if let Some(converted) = a.list_to_array(val) {
+        let len = a.get_array_len(converted).unwrap_or(0);
+        (converted, len)
+    } else {
+        return Err(format!(
+            "field '{}': expected array or list for repeated field, got {}",
             field.name(),
             a.type_name(val)
-        )
-    })?;
+        ));
+    };
 
     let mut result = Vec::with_capacity(arr_len);
     for i in 0..arr_len {
-        let item = a.get_array_item(val, i);
+        let item = a.get_array_item(arr, i);
         if a.check_nil(item) {
             continue;
         }
