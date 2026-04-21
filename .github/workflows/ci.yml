@@ -80,10 +80,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install elle + GNU parallel
+      - name: Install elle, GNU parallel, clang, fontconfig
         run: |
           sudo apt-get update
-          sudo apt-get install -y parallel
+          sudo apt-get install -y parallel libclang-dev llvm-dev clang libfontconfig1-dev
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
           # Build elle from source (needed to run test scripts)
           git clone --depth 1 https://github.com/elle-lisp/elle /tmp/elle
           cd /tmp/elle && cargo build --release -p elle
@@ -115,7 +116,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install libclang
+      - name: Install libclang, fontconfig
         run: |
           sudo apt-get update
           sudo apt-get install -y libclang-dev llvm-dev clang libfontconfig1-dev
