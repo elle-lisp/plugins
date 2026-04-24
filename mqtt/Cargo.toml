@@ -7,6 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin.workspace = true
+elle-plugin = { path = "../../elle-plugin" }
 mqttbytes = "0.6"
 bytes = "1"

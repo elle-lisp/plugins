@@ -4,9 +4,9 @@ use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 use oxigraph::io::{RdfFormat, RdfSerializer};
 use oxigraph::model::{
-    BlankNode, GraphName, GraphNameRef, Literal, NamedNode, Quad, Subject, Term,
+    BlankNode, GraphName, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Quad, Term,
 };
-use oxigraph::sparql::QueryResults;
+use oxigraph::sparql::{QueryResults, SparqlEvaluator};
 use oxigraph::store::Store;
 
 // ---------------------------------------------------------------------------
@@ -73,6 +73,7 @@ mod rlimit {
     }
 
     /// Read current soft RLIMIT_NOFILE (for tests).
+    #[cfg(test)]
     pub fn get_nofile_cur() -> std::io::Result<u64> {
         let mut cur = Rlimit { rlim_cur: 0, rlim_max: 0 };
         if unsafe { getrlimit(RLIMIT_NOFILE, &mut cur) } != 0 {
@@ -82,6 +83,7 @@ mod rlimit {
     }
 
     /// Set soft RLIMIT_NOFILE to a specific value (for tests).
+    #[cfg(test)]
     pub fn set_nofile_cur(val: u64) -> std::io::Result<()> {
         let mut cur = Rlimit { rlim_cur: 0, rlim_max: 0 };
         if unsafe { getrlimit(RLIMIT_NOFILE, &mut cur) } != 0 {
@@ -220,12 +222,10 @@ fn literal_to_elle(l: &Literal) -> ElleValue {
 
 /// Convert an oxigraph `Term` to an Elle array.
 fn term_to_elle(term: &Term) -> ElleValue {
-    let a = api();
     match term {
         Term::NamedNode(n) => iri_to_elle(n),
         Term::BlankNode(b) => bnode_to_elle(b),
         Term::Literal(l) => literal_to_elle(l),
-        Term::Triple(_) => a.nil(),
     }
 }
 
@@ -292,7 +292,7 @@ fn elle_to_graph_name(val: ElleValue, prim: &str) -> Result<GraphName, ElleResul
     match term {
         Term::NamedNode(n) => Ok(GraphName::NamedNode(n)),
         Term::BlankNode(b) => Ok(GraphName::BlankNode(b)),
-        Term::Literal(_) | Term::Triple(_) => {
+        Term::Literal(_) => {
             Err(a.err("type-error", &format!("{}: graph name must be an IRI or blank node", prim)))
         }
     }
@@ -468,12 +468,10 @@ fn graph_name_to_elle(gn: &GraphName) -> ElleValue {
     }
 }
 
-fn subject_to_elle(s: &Subject) -> ElleValue {
-    let a = api();
+fn subject_to_elle(s: &NamedOrBlankNode) -> ElleValue {
     match s {
-        Subject::NamedNode(n) => iri_to_elle(n),
-        Subject::BlankNode(b) => bnode_to_elle(b),
-        Subject::Triple(_) => a.nil(),
+        NamedOrBlankNode::NamedNode(n) => iri_to_elle(n),
+        NamedOrBlankNode::BlankNode(b) => bnode_to_elle(b),
     }
 }
 
@@ -497,9 +495,9 @@ fn elle_quad_to_oxigraph(val: ElleValue, prim: &str) -> Result<Quad, ElleResult>
     }
 
     let subject_term = elle_to_term(a.get_array_item(val, 0), prim)?;
-    let subject: Subject = match subject_term {
-        Term::NamedNode(n) => Subject::NamedNode(n),
-        Term::BlankNode(b) => Subject::BlankNode(b),
+    let subject: NamedOrBlankNode = match subject_term {
+        Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
+        Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
         _ => return Err(a.err("type-error", &format!("{}: subject must be an IRI or blank node", prim))),
     };
 
@@ -595,7 +593,11 @@ extern "C" fn prim_query(args: *const ElleValue, nargs: usize) -> ElleResult {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("{}: expected string sparql, got {}", PRIM, a.type_name(v1))),
     };
-    let results = match store.query(&sparql) {
+    let prepared = match SparqlEvaluator::new().parse_query(&sparql) {
+        Ok(q) => q,
+        Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+    };
+    let results = match prepared.on_store(store).execute() {
         Ok(r) => r,
         Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
     };
@@ -623,13 +625,8 @@ extern "C" fn prim_query(args: *const ElleValue, nargs: usize) -> ElleResult {
                     Ok(t) => t,
                     Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
                 };
-                let subject_val = match &triple.subject {
-                    Subject::NamedNode(n) => iri_to_elle(n),
-                    Subject::BlankNode(b) => bnode_to_elle(b),
-                    Subject::Triple(_) => a.nil(),
-                };
                 rows.push(a.array(&[
-                    subject_val,
+                    subject_to_elle(&triple.subject),
                     iri_to_elle(&triple.predicate),
                     term_to_elle(&triple.object),
                     a.nil(),
@@ -652,7 +649,11 @@ extern "C" fn prim_update(args: *const ElleValue, nargs: usize) -> ElleResult {
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("{}: expected string sparql-update, got {}", PRIM, a.type_name(v1))),
     };
-    match store.update(&sparql) {
+    let prepared = match SparqlEvaluator::new().parse_update(&sparql) {
+        Ok(u) => u,
+        Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+    };
+    match prepared.on_store(store).execute() {
         Ok(()) => a.ok(a.nil()),
         Err(e) => a.err("sparql-error", &format!("{}: {}", PRIM, e)),
     }

@@ -64,7 +64,14 @@ jobs:
           sudo apt-get install -y libclang-dev llvm-dev clang libfontconfig1-dev
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
       - name: Build
-        run: cargo build --release -p elle-${{ matrix.plugin }}
+        env:
+          CARGO_TARGET_DIR: target
+        run: |
+          mv Cargo.toml Cargo.toml.workspace
+          mv Cargo.lock Cargo.lock.workspace 2>/dev/null || true
+          cargo build --release --manifest-path ${{ matrix.plugin }}/Cargo.toml
+          mv Cargo.toml.workspace Cargo.toml
+          mv Cargo.lock.workspace Cargo.lock 2>/dev/null || true
       - name: Upload .so
         uses: actions/upload-artifact@v4
         with:

@@ -89,6 +89,10 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 2. **Plugins depend on `elle-plugin`, not `elle`.** This enables independent compilation.
 3. **ABI is stable.** Plugins compiled against one elle version work with future versions.
 4. **Keywords interned through the API** route to the host's global table.
+5. **Clippy warnings are CI errors.** The clippy job runs
+   `cargo clippy --workspace -- -D warnings`. Any warning — deprecation,
+   dead code, unused import, etc. — fails the build. Fix all warnings
+   before merging.
 
 ## Dependents
 

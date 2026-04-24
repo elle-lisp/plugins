@@ -27,6 +27,3 @@ members = [
     "yaml",
 ]
 resolver = "2"
-
-[workspace.dependencies]
-elle-plugin = { path = "../elle-plugin" }

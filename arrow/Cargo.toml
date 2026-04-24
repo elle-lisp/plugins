@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin.workspace = true
+elle-plugin = { path = "../../elle-plugin" }
 arrow = { version = "54", features = ["ipc", "json", "prettyprint"] }
 bytes = "1"
 parquet = { version = "54", features = ["arrow"] }

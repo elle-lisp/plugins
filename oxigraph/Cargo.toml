@@ -7,5 +7,5 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin.workspace = true
-oxigraph = "0.4"
+elle-plugin = { path = "../../elle-plugin" }
+oxigraph = "0.5"

@@ -7,5 +7,5 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin.workspace = true
+elle-plugin = { path = "../../elle-plugin" }
 polars = { version = "0.46", features = ["lazy", "csv", "parquet", "json", "dtype-struct"] }

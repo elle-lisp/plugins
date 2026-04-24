@@ -7,6 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin.workspace = true
+elle-plugin = { path = "../../elle-plugin" }
 serde_yaml_ng = "0.10"
 serde = "1"

@@ -7,6 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-elle-plugin.workspace = true
+elle-plugin = { path = "../../elle-plugin" }
 rand = "0.9"
 rand_chacha = "0.9"
