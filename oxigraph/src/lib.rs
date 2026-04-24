@@ -10,6 +10,140 @@ use oxigraph::sparql::QueryResults;
 use oxigraph::store::Store;
 
 // ---------------------------------------------------------------------------
+// RLIMIT_NOFILE clamping (oxigraph panics when ulimit -n is unlimited)
+// ---------------------------------------------------------------------------
+
+/// Oxigraph's RocksDB wrapper converts the soft fd limit to c_int via
+/// `try_into().unwrap()`.  When `ulimit -n` is "unlimited" (RLIM_INFINITY),
+/// that conversion panics and — because we cross the C FFI — aborts the
+/// process.  Clamp to a sane ceiling before opening the store, then restore.
+#[cfg(unix)]
+mod rlimit {
+    use std::io;
+
+    const MAX_OPEN_FILES: u64 = 65536;
+
+    // Use the same raw-extern-C style as fd_ops below to avoid a libc dep.
+    #[cfg(target_os = "macos")]
+    const RLIMIT_NOFILE: i32 = 8;
+    #[cfg(target_os = "linux")]
+    const RLIMIT_NOFILE: i32 = 7;
+
+    #[cfg(target_os = "macos")]
+    const RLIM_INFINITY: u64 = 0x7fff_ffff_ffff_ffff;
+    #[cfg(target_os = "linux")]
+    const RLIM_INFINITY: u64 = u64::MAX;
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct Rlimit {
+        pub rlim_cur: u64,
+        pub rlim_max: u64,
+    }
+
+    extern "C" {
+        fn getrlimit(resource: i32, rlim: *mut Rlimit) -> i32;
+        fn setrlimit(resource: i32, rlim: *const Rlimit) -> i32;
+    }
+
+    pub struct SavedRlimit {
+        saved: Rlimit,
+    }
+
+    pub fn clamp_nofile() -> io::Result<Option<SavedRlimit>> {
+        let mut cur = Rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { getrlimit(RLIMIT_NOFILE, &mut cur) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if cur.rlim_cur != RLIM_INFINITY && cur.rlim_cur <= i32::MAX as u64 {
+            return Ok(None); // already safe
+        }
+        let clamped = Rlimit {
+            rlim_cur: MAX_OPEN_FILES.min(cur.rlim_max),
+            rlim_max: cur.rlim_max,
+        };
+        if unsafe { setrlimit(RLIMIT_NOFILE, &clamped) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Some(SavedRlimit { saved: cur }))
+    }
+
+    pub fn restore_nofile(s: SavedRlimit) {
+        unsafe { setrlimit(RLIMIT_NOFILE, &s.saved) };
+    }
+
+    /// Read current soft RLIMIT_NOFILE (for tests).
+    pub fn get_nofile_cur() -> std::io::Result<u64> {
+        let mut cur = Rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { getrlimit(RLIMIT_NOFILE, &mut cur) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(cur.rlim_cur)
+    }
+
+    /// Set soft RLIMIT_NOFILE to a specific value (for tests).
+    pub fn set_nofile_cur(val: u64) -> std::io::Result<()> {
+        let mut cur = Rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { getrlimit(RLIMIT_NOFILE, &mut cur) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let new = Rlimit { rlim_cur: val, rlim_max: cur.rlim_max };
+        if unsafe { setrlimit(RLIMIT_NOFILE, &new) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod rlimit_tests {
+    use super::rlimit;
+
+    #[test]
+    fn clamp_noop_when_already_safe() {
+        let before = rlimit::get_nofile_cur().unwrap();
+        // Ensure we're starting with a sane value
+        if before > i32::MAX as u64 {
+            rlimit::set_nofile_cur(4096).unwrap();
+        }
+        let before = rlimit::get_nofile_cur().unwrap();
+        assert!(before <= i32::MAX as u64);
+
+        let saved = rlimit::clamp_nofile().unwrap();
+        assert!(saved.is_none(), "should not clamp when already safe");
+
+        let after = rlimit::get_nofile_cur().unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn clamp_and_restore_when_too_high() {
+        let original = rlimit::get_nofile_cur().unwrap();
+
+        // Set to a value that exceeds i32::MAX to trigger the clamp
+        let too_high: u64 = (i32::MAX as u64) + 1;
+        // This may fail if rlim_max is lower; skip in that case.
+        if rlimit::set_nofile_cur(too_high).is_err() {
+            return;
+        }
+
+        let saved = rlimit::clamp_nofile().unwrap();
+        assert!(saved.is_some(), "should clamp when fd limit exceeds i32::MAX");
+
+        let clamped = rlimit::get_nofile_cur().unwrap();
+        assert!(clamped <= i32::MAX as u64, "clamped value {} should fit in c_int", clamped);
+
+        rlimit::restore_nofile(saved.unwrap());
+
+        let restored = rlimit::get_nofile_cur().unwrap();
+        assert_eq!(restored, too_high, "should restore original value");
+
+        // Clean up: restore the actual original
+        let _ = rlimit::set_nofile_cur(original);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // fd save/restore (RocksDB redirects stdio)
 // ---------------------------------------------------------------------------
 
@@ -221,11 +355,23 @@ extern "C" fn prim_store_open(args: *const ElleValue, nargs: usize) -> ElleResul
         Some(s) => s.to_string(),
         None => return a.err("type-error", &format!("oxigraph/store-open: expected string path, got {}", a.type_name(v))),
     };
+
+    // Clamp RLIMIT_NOFILE so RocksDB doesn't panic on unlimited fd limits.
+    #[cfg(unix)]
+    let saved_rlimit = match rlimit::clamp_nofile() {
+        Ok(s) => s,
+        Err(e) => return oxigraph_err("oxigraph/store-open", e),
+    };
+
     let saved_stdout = save_fd(1);
     let saved_stderr = save_fd(2);
     let result = Store::open(&path);
     if let Some(fd) = saved_stdout { restore_fd(fd, 1); }
     if let Some(fd) = saved_stderr { restore_fd(fd, 2); }
+
+    #[cfg(unix)]
+    if let Some(s) = saved_rlimit { rlimit::restore_nofile(s); }
+
     match result {
         Ok(store) => a.ok(a.external("oxigraph/store", store)),
         Err(e) => oxigraph_err("oxigraph/store-open", e),
