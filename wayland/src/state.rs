@@ -5,6 +5,7 @@
 
 use wayland_client::protocol::{wl_output, wl_registry, wl_seat, wl_shm};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1;
 
 // ── Events ────────────────────────────────────────────────────────────
 
@@ -77,6 +78,7 @@ pub struct WaylandState {
     pub seats: Vec<SeatInfo>,
     pub shm: Option<wl_shm::WlShm>,
     pub compositor: Option<wayland_client::protocol::wl_compositor::WlCompositor>,
+    pub layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     next_output_id: u32,
     next_seat_id: u32,
 }
@@ -89,6 +91,7 @@ impl WaylandState {
             seats: Vec::new(),
             shm: None,
             compositor: None,
+            layer_shell: None,
             next_output_id: 1,
             next_seat_id: 1,
         }
@@ -125,7 +128,18 @@ impl Dispatch<wl_registry::WlRegistry, ()> for WaylandState {
                 }
                 "wl_compositor" => {
                     state.compositor = Some(
-                        registry.bind::<wayland_client::protocol::wl_compositor::WlCompositor, _, _>(
+                        registry
+                            .bind::<wayland_client::protocol::wl_compositor::WlCompositor, _, _>(
+                                name,
+                                version.min(4),
+                                qh,
+                                (),
+                            ),
+                    );
+                }
+                "zwlr_layer_shell_v1" => {
+                    state.layer_shell = Some(
+                        registry.bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(
                             name,
                             version.min(4),
                             qh,
