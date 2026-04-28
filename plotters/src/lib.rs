@@ -23,6 +23,7 @@ struct ChartOpts {
     y_range: Option<(f64, f64)>,
     colors: Vec<RGBColor>,
     bins: usize,
+    legend: bool,
 }
 
 impl Default for ChartOpts {
@@ -38,6 +39,7 @@ impl Default for ChartOpts {
             y_range: None,
             colors: default_palette(),
             bins: 20,
+            legend: true,
         }
     }
 }
@@ -47,6 +49,7 @@ enum SeriesKind {
     Line,
     Scatter,
     Area,
+    Bar,
 }
 
 struct SeriesSpec {
@@ -54,6 +57,7 @@ struct SeriesSpec {
     label: Option<String>,
     data: Vec<(f64, f64)>,
     color: Option<RGBColor>,
+    size: Option<u32>,
 }
 
 // ── Palette ──────────────────────────────────────────────────────────
@@ -79,7 +83,23 @@ fn num(a: &elle_plugin::Api, v: ElleValue) -> Option<f64> {
     a.get_float(v).or_else(|| a.get_int(v).map(|i| i as f64))
 }
 
+fn parse_hex_color(s: &str) -> Option<RGBColor> {
+    let s = s.strip_prefix('#')?;
+    if s.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some(RGBColor(r, g, b))
+}
+
 fn parse_color(a: &elle_plugin::Api, val: ElleValue) -> Option<RGBColor> {
+    // Try hex string like "#ff0000"
+    if let Some(s) = a.get_string(val) {
+        return parse_hex_color(s);
+    }
+    // Try [r g b] array
     if let Some(len) = a.get_array_len(val) {
         if len >= 3 {
             let r = a.get_int(a.get_array_item(val, 0))? as u8;
@@ -88,6 +108,7 @@ fn parse_color(a: &elle_plugin::Api, val: ElleValue) -> Option<RGBColor> {
             return Some(RGBColor(r, g, b));
         }
     }
+    // Try keyword like :red
     match a.get_keyword_name(val)? {
         "red" => Some(RGBColor(214, 39, 40)),
         "blue" => Some(RGBColor(31, 119, 180)),
@@ -146,6 +167,13 @@ fn parse_opts(a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
     }
     if let Some(r) = parse_range(a, a.get_struct_field(val, "y-range")) {
         o.y_range = Some(r);
+    }
+    // :legend false — check for boolean false, int 0, or keyword :false
+    let legend_val = a.get_struct_field(val, "legend");
+    if let Some(b) = a.get_bool(legend_val) {
+        o.legend = b;
+    } else if a.get_int(legend_val) == Some(0) {
+        o.legend = false;
     }
     if let Some(c) = parse_color(a, a.get_struct_field(val, "color")) {
         o.colors = vec![c];
@@ -232,6 +260,7 @@ fn extract_labels(
 fn auto_range(series: &[SeriesSpec]) -> ((f64, f64), (f64, f64)) {
     let (mut xlo, mut xhi) = (f64::INFINITY, f64::NEG_INFINITY);
     let (mut ylo, mut yhi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let has_bars = series.iter().any(|s| matches!(s.kind, SeriesKind::Bar));
     for s in series {
         for &(x, y) in &s.data {
             xlo = xlo.min(x);
@@ -239,6 +268,11 @@ fn auto_range(series: &[SeriesSpec]) -> ((f64, f64), (f64, f64)) {
             ylo = ylo.min(y);
             yhi = yhi.max(y);
         }
+    }
+    // Bar charts should always include y=0
+    if has_bars {
+        ylo = ylo.min(0.0);
+        yhi = yhi.max(0.0);
     }
     if xlo == f64::INFINITY {
         return ((0.0, 1.0), (0.0, 1.0));
@@ -300,24 +334,26 @@ fn draw_xy<DB: DrawingBackend>(
         let c = s.color.unwrap_or(opts.colors[i % opts.colors.len()]);
         match s.kind {
             SeriesKind::Line => {
+                let w = s.size.unwrap_or(2);
                 let d = chart
-                    .draw_series(LineSeries::new(s.data.iter().copied(), c.stroke_width(2)))
+                    .draw_series(LineSeries::new(s.data.iter().copied(), c.stroke_width(w)))
                     .map_err(|e| e.to_string())?;
                 if let Some(ref lbl) = s.label {
                     d.label(lbl).legend(move |(x, y)| {
-                        PathElement::new(vec![(x, y), (x + 20, y)], c.stroke_width(2))
+                        PathElement::new(vec![(x, y), (x + 20, y)], c.stroke_width(w))
                     });
                 }
             }
             SeriesKind::Scatter => {
+                let r = s.size.unwrap_or(3);
                 let d = chart
                     .draw_series(
-                        s.data.iter().map(|&(x, y)| Circle::new((x, y), 3, c.filled())),
+                        s.data.iter().map(|&(x, y)| Circle::new((x, y), r, c.filled())),
                     )
                     .map_err(|e| e.to_string())?;
                 if let Some(ref lbl) = s.label {
                     d.label(lbl)
-                        .legend(move |(x, y)| Circle::new((x, y), 3, c.filled()));
+                        .legend(move |(x, y)| Circle::new((x, y), r, c.filled()));
                 }
             }
             SeriesKind::Area => {
@@ -333,10 +369,62 @@ fn draw_xy<DB: DrawingBackend>(
                     });
                 }
             }
+            SeriesKind::Bar => {
+                // Collect all x positions across all bar series to determine layout.
+                let mut all_bar_xs: Vec<f64> = series.iter()
+                    .filter(|ss| matches!(ss.kind, SeriesKind::Bar))
+                    .flat_map(|ss| ss.data.iter().map(|&(x, _)| x))
+                    .collect();
+                all_bar_xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                all_bar_xs.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+
+                // Count how many series share each x position
+                let max_at_same_x = {
+                    let mut max = 0usize;
+                    for &xv in &all_bar_xs {
+                        let count = series.iter()
+                            .filter(|ss| matches!(ss.kind, SeriesKind::Bar))
+                            .filter(|ss| ss.data.iter().any(|&(x, _)| (x - xv).abs() < 1e-9))
+                            .count();
+                        max = max.max(count);
+                    }
+                    max.max(1)
+                };
+
+                // Min gap between distinct x positions
+                let min_gap = if all_bar_xs.len() >= 2 {
+                    all_bar_xs.windows(2)
+                        .map(|w| w[1] - w[0])
+                        .fold(f64::INFINITY, f64::min)
+                } else {
+                    (xr.1 - xr.0).max(1.0)
+                };
+
+                let total_bar_width = min_gap * 0.8;
+                let single_width = total_bar_width / max_at_same_x as f64;
+
+                // This series' index among those sharing each x
+                let bar_idx = series[..i].iter()
+                    .filter(|ss| matches!(ss.kind, SeriesKind::Bar))
+                    .count() % max_at_same_x;
+                let group_offset = -total_bar_width / 2.0 + single_width * bar_idx as f64;
+
+                let d = chart
+                    .draw_series(s.data.iter().map(|&(x, y)| {
+                        let x0 = x + group_offset;
+                        Rectangle::new([(x0, 0.0), (x0 + single_width, y)], c.filled())
+                    }))
+                    .map_err(|e| e.to_string())?;
+                if let Some(ref lbl) = s.label {
+                    d.label(lbl).legend(move |(x, y)| {
+                        Rectangle::new([(x, y - 5), (x + 20, y + 5)], c.filled())
+                    });
+                }
+            }
         }
     }
 
-    if has_labels {
+    if has_labels && opts.legend {
         chart
             .configure_series_labels()
             .background_style(WHITE.mix(0.8))
@@ -553,7 +641,7 @@ extern "C" fn prim_line(args: *const ElleValue, nargs: usize) -> ElleResult {
     };
     let opts =
         if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
-    let series = vec![SeriesSpec { kind: SeriesKind::Line, label: None, data: pts, color: None }];
+    let series = vec![SeriesSpec { kind: SeriesKind::Line, label: None, data: pts, color: None, size: None }];
     match render_xy_chart(&series, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err("plotters-error", &format!("plotters/line: {}", e)),
@@ -569,7 +657,7 @@ extern "C" fn prim_scatter(args: *const ElleValue, nargs: usize) -> ElleResult {
     let opts =
         if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series =
-        vec![SeriesSpec { kind: SeriesKind::Scatter, label: None, data: pts, color: None }];
+        vec![SeriesSpec { kind: SeriesKind::Scatter, label: None, data: pts, color: None, size: None }];
     match render_xy_chart(&series, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err("plotters-error", &format!("plotters/scatter: {}", e)),
@@ -584,7 +672,7 @@ extern "C" fn prim_area(args: *const ElleValue, nargs: usize) -> ElleResult {
     };
     let opts =
         if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
-    let series = vec![SeriesSpec { kind: SeriesKind::Area, label: None, data: pts, color: None }];
+    let series = vec![SeriesSpec { kind: SeriesKind::Area, label: None, data: pts, color: None, size: None }];
     match render_xy_chart(&series, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err("plotters-error", &format!("plotters/area: {}", e)),
@@ -664,11 +752,12 @@ extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
             Some("line") => SeriesKind::Line,
             Some("scatter") => SeriesKind::Scatter,
             Some("area") => SeriesKind::Area,
+            Some("bar") => SeriesKind::Bar,
             _ => {
                 return a.err(
                     "value-error",
                     &format!(
-                        "plotters/chart: series[{}] :type must be :line, :scatter, or :area",
+                        "plotters/chart: series[{}] :type must be :line, :scatter, :area, or :bar",
                         i
                     ),
                 )
@@ -684,7 +773,8 @@ extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
             Err(e) => return e,
         };
         let color = parse_color(a, a.get_struct_field(s, "color"));
-        series.push(SeriesSpec { kind, label, data, color });
+        let size = a.get_int(a.get_struct_field(s, "size")).map(|v| v.max(1) as u32);
+        series.push(SeriesSpec { kind, label, data, color, size });
     }
     match render_xy_chart(&series, &opts) {
         Ok(v) => a.ok(v),
@@ -750,7 +840,7 @@ static PRIMITIVES: &[EllePrimDef] = &[
         prim_chart,
         SIG_ERROR,
         1,
-        "Multi-series chart. Spec: {:series [{:type :line/:scatter/:area :data [[x y]...] :label str :color}] :title :x-label :y-label :width :height :format :x-range :y-range}.",
+        "Multi-series chart. Spec: {:series [{:type :line/:scatter/:area/:bar :data [[x y]...] :label str :color}] :title :x-label :y-label :width :height :format :x-range :y-range}. Colors accept :keyword, [r g b], or \"#rrggbb\".",
         "plotters",
         "(plotters/chart {:title \"Compare\" :series [{:type :line :label \"A\" :data [[1 10] [2 20]]}]})",
     ),
