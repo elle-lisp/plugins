@@ -43,14 +43,14 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, u32> for WaylandS
     ) {
         match event {
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
-                state
-                    .events
-                    .push(WlEvent::ScreencopyReady { frame_id: *frame_id });
+                state.events.push(WlEvent::ScreencopyReady {
+                    frame_id: *frame_id,
+                });
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
-                state
-                    .events
-                    .push(WlEvent::ScreencopyFailed { frame_id: *frame_id });
+                state.events.push(WlEvent::ScreencopyFailed {
+                    frame_id: *frame_id,
+                });
             }
             _ => {}
         }

@@ -19,9 +19,7 @@ pub struct ToplevelInfo {
 
 // ── Dispatch impls ────────────────────────────────────────────────────
 
-impl Dispatch<zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1, ()>
-    for WaylandState
-{
+impl Dispatch<zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1, ()> for WaylandState {
     fn event(
         _state: &mut Self,
         _manager: &zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1,
@@ -34,9 +32,7 @@ impl Dispatch<zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1, ()
     }
 }
 
-impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, u32>
-    for WaylandState
-{
+impl Dispatch<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, u32> for WaylandState {
     fn event(
         state: &mut Self,
         _handle: &zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1,
