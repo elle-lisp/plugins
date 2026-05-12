@@ -342,10 +342,9 @@ fn decode_message(ctx: *mut ElleCtx, msg: &DynamicMessage) -> Result<ElleValue, 
     let mut fields: Vec<(String, ElleValue)> = Vec::new();
 
     for field in msg.descriptor().fields() {
-        if !msg.has_field(&field) {
-            continue;
-        }
-
+        // Always emit every field. For proto3, `get_field` returns the
+        // default value (0, "", false, empty list/map) when the field
+        // was not present on the wire. This avoids nil surprises in Elle.
         let pb_val = msg.get_field(&field);
         let elle_val = if field.is_map() {
             decode_map_field(ctx, pb_val.as_ref(), &field)?
