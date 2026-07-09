@@ -5,13 +5,18 @@
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK};
 
 elle_plugin::define_plugin!("crypto/", &PRIMITIVES);
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
+/// Coerce a string or bytes argument to raw bytes.
+///
+/// Takes the per-call `ctx` so that the error value it may construct is
+/// allocated into the calling primitive's region (ABI v3).
 fn extract_byte_data(
+    ctx: *mut ElleCtx,
     val: ElleValue,
     name: &str,
     pos: &str,
@@ -22,7 +27,7 @@ fn extract_byte_data(
     } else if let Some(b) = a.get_bytes(val) {
         Ok(b.to_vec())
     } else {
-        Err(a.err("type-error", &format!(
+        Err(a.err(ctx, "type-error", &format!(
             "{}: {} must be string or bytes", name, pos,
         )))
     }
@@ -33,22 +38,23 @@ fn extract_byte_data(
 macro_rules! hash_primitive {
     ($fn_name:ident, $hasher:ty, $prim_name:expr) => {
         extern "C" fn $fn_name(
+            ctx: *mut ElleCtx,
             args: *const ElleValue,
             nargs: usize,
         ) -> ElleResult {
             let a = api();
             if nargs != 1 {
-                return a.err("arity-error", &format!(
+                return a.err(ctx, "arity-error", &format!(
                     "{}: expected 1 argument, got {}", $prim_name, nargs,
                 ));
             }
             let val = unsafe { a.arg(args, nargs, 0) };
-            let data = match extract_byte_data(val, $prim_name, "argument") {
+            let data = match extract_byte_data(ctx, val, $prim_name, "argument") {
                 Ok(d) => d,
                 Err(e) => return e,
             };
             let hash = <$hasher>::digest(&data);
-            a.ok(a.bytes(&hash))
+            a.ok(a.bytes(ctx, &hash))
         }
     };
 }
@@ -56,22 +62,23 @@ macro_rules! hash_primitive {
 macro_rules! hmac_primitive {
     ($fn_name:ident, $hasher:ty, $prim_name:expr) => {
         extern "C" fn $fn_name(
+            ctx: *mut ElleCtx,
             args: *const ElleValue,
             nargs: usize,
         ) -> ElleResult {
             let a = api();
             if nargs != 2 {
-                return a.err("arity-error", &format!(
+                return a.err(ctx, "arity-error", &format!(
                     "{}: expected 2 arguments, got {}", $prim_name, nargs,
                 ));
             }
             let key_val = unsafe { a.arg(args, nargs, 0) };
             let msg_val = unsafe { a.arg(args, nargs, 1) };
-            let key = match extract_byte_data(key_val, $prim_name, "key") {
+            let key = match extract_byte_data(ctx, key_val, $prim_name, "key") {
                 Ok(d) => d,
                 Err(e) => return e,
             };
-            let message = match extract_byte_data(msg_val, $prim_name, "message") {
+            let message = match extract_byte_data(ctx, msg_val, $prim_name, "message") {
                 Ok(d) => d,
                 Err(e) => return e,
             };
@@ -79,7 +86,7 @@ macro_rules! hmac_primitive {
                 <Hmac<$hasher>>::new_from_slice(&key).expect("HMAC accepts any key length");
             mac.update(&message);
             let result = mac.finalize().into_bytes();
-            a.ok(a.bytes(&result))
+            a.ok(a.bytes(ctx, &result))
         }
     };
 }
