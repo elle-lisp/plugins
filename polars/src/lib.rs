@@ -4,7 +4,7 @@ use std::io::Cursor;
 
 use polars::prelude::*;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("polars/", &PRIMITIVES);
 
@@ -19,42 +19,42 @@ struct LazyWrap(LazyFrame);
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn get_df<'a>(val: ElleValue, name: &str) -> Result<&'a DfWrap, ElleResult> {
+fn get_df<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a DfWrap, ElleResult> {
     let a = api();
     a.get_external::<DfWrap>(val, "polars/df").ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected polars/df, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected polars/df, got {}", name, a.type_name(val)))
     })
 }
 
-fn get_lazy<'a>(val: ElleValue, name: &str) -> Result<&'a LazyWrap, ElleResult> {
+fn get_lazy<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a LazyWrap, ElleResult> {
     let a = api();
     a.get_external::<LazyWrap>(val, "polars/lazy").ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected polars/lazy, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected polars/lazy, got {}", name, a.type_name(val)))
     })
 }
 
-fn extract_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
+fn extract_string(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<String, ElleResult> {
     let a = api();
     a.get_string(val).map(|s| s.to_string()).ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected string, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected string, got {}", name, a.type_name(val)))
     })
 }
 
-fn extract_string_list(val: ElleValue, name: &str) -> Result<Vec<String>, ElleResult> {
+fn extract_string_list(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<Vec<String>, ElleResult> {
     let a = api();
     let len = a.get_array_len(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected array of strings, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected array of strings, got {}", name, a.type_name(val)))
     })?;
     let mut out = Vec::with_capacity(len);
     for i in 0..len {
         let item = a.get_array_item(val, i);
-        out.push(extract_string(item, name)?);
+        out.push(extract_string(ctx, item, name)?);
     }
     Ok(out)
 }
 
 /// Convert a Polars Series to an Elle array of values.
-fn series_to_elle(s: &Series) -> Vec<ElleValue> {
+fn series_to_elle(ctx: *mut ElleCtx, s: &Series) -> Vec<ElleValue> {
     let a = api();
     let len = s.len();
     let mut out = Vec::with_capacity(len);
@@ -73,8 +73,8 @@ fn series_to_elle(s: &Series) -> Vec<ElleValue> {
             Ok(AnyValue::UInt64(v)) => out.push(a.int(v as i64)),
             Ok(AnyValue::Float32(v)) => out.push(a.float(v as f64)),
             Ok(AnyValue::Float64(v)) => out.push(a.float(v)),
-            Ok(AnyValue::String(s)) => out.push(a.string(s)),
-            Ok(other) => out.push(a.string(&format!("{}", other))),
+            Ok(AnyValue::String(s)) => out.push(a.string(ctx, s)),
+            Ok(other) => out.push(a.string(ctx, &format!("{}", other))),
             Err(_) => out.push(a.nil()),
         }
     }
@@ -82,27 +82,27 @@ fn series_to_elle(s: &Series) -> Vec<ElleValue> {
 }
 
 /// Convert a DataFrame to an Elle array of structs.
-fn df_to_elle(df: &DataFrame) -> ElleValue {
+fn df_to_elle(ctx: *mut ElleCtx, df: &DataFrame) -> ElleValue {
     let a = api();
     let num_rows = df.height();
     let columns: Vec<(&str, Vec<ElleValue>)> = df.get_columns().iter()
-        .map(|s| (s.name().as_str(), series_to_elle(s.as_materialized_series())))
+        .map(|s| (s.name().as_str(), series_to_elle(ctx, s.as_materialized_series())))
         .collect();
     let mut rows: Vec<ElleValue> = Vec::with_capacity(num_rows);
     for i in 0..num_rows {
         let fields: Vec<(&str, ElleValue)> = columns.iter()
             .map(|(col_name, col_vals)| (*col_name, col_vals[i]))
             .collect();
-        rows.push(a.build_struct(&fields));
+        rows.push(a.build_struct(ctx, &fields));
     }
-    a.array(&rows)
+    a.array(ctx, &rows)
 }
 
 /// Build a Vec<Series> from an Elle struct of column-name -> array mappings.
-fn elle_struct_to_columns(val: ElleValue, name: &str) -> Result<Vec<Series>, ElleResult> {
+fn elle_struct_to_columns(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<Vec<Series>, ElleResult> {
     let a = api();
     if !a.check_struct(val) {
-        return Err(a.err("type-error", &format!("{}: expected struct of column arrays", name)));
+        return Err(a.err(ctx, "type-error", &format!("{}: expected struct of column arrays", name)));
     }
     // We need to iterate struct fields. The new API uses get_struct_field.
     // We don't have a way to enumerate keys, so we'll need to use a different approach.
@@ -169,11 +169,12 @@ fn elle_struct_to_columns(val: ElleValue, name: &str) -> Result<Vec<Series>, Ell
     //
     // Actually, for the migration to be functional, I should keep these
     // functions working. Let me just return an error explaining the limitation.
-    Err(a.err("polars-error", &format!("{}: struct iteration not supported in stable ABI; pass data as array of [name values] pairs", name)))
+    Err(a.err(ctx, "polars-error", &format!("{}: struct iteration not supported in stable ABI; pass data as array of [name values] pairs", name)))
 }
 
 /// Convert Elle values to a Polars Series, inferring type from first non-nil value.
 fn elle_values_to_series(
+    ctx: *mut ElleCtx,
     col_name: &str,
     values: &[ElleValue],
     prim_name: &str,
@@ -207,7 +208,7 @@ fn elle_values_to_series(
                 .collect();
             Ok(Series::new(col_name.into(), &vals))
         }
-        _ => Err(a.err("polars-error", &format!("{}: cannot infer type for column '{}'", prim_name, col_name))),
+        _ => Err(a.err(ctx, "polars-error", &format!("{}: cannot infer type for column '{}'", prim_name, col_name))),
     }
 }
 
@@ -215,7 +216,7 @@ fn elle_values_to_series(
 // Primitives — DataFrame construction
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_df(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_df(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     // Accept an array of [name, values] pairs as a workaround for struct iteration
@@ -224,30 +225,30 @@ extern "C" fn prim_df(args: *const ElleValue, nargs: usize) -> ElleResult {
         // Array of [col_name, col_values] pairs
         let pair_count = match a.get_array_len(v) {
             Some(n) => n,
-            None => return a.err("type-error", "polars/df: expected struct or array of [name values] pairs"),
+            None => return a.err(ctx, "type-error", "polars/df: expected struct or array of [name values] pairs"),
         };
         let mut columns = Vec::new();
         for i in 0..pair_count {
             let pair = a.get_array_item(v, i);
             let pair_len = a.get_array_len(pair).unwrap_or(0);
             if pair_len != 2 {
-                return a.err("type-error", "polars/df: each element must be [col-name, values-array]");
+                return a.err(ctx, "type-error", "polars/df: each element must be [col-name, values-array]");
             }
             let name_v = a.get_array_item(pair, 0);
             let col_name = match a.get_string(name_v) {
                 Some(s) => s.to_string(),
-                None => return a.err("type-error", "polars/df: column name must be a string"),
+                None => return a.err(ctx, "type-error", "polars/df: column name must be a string"),
             };
             let vals_v = a.get_array_item(pair, 1);
             let vals_len = match a.get_array_len(vals_v) {
                 Some(n) => n,
-                None => return a.err("type-error", &format!("polars/df: column '{}' values must be an array", col_name)),
+                None => return a.err(ctx, "type-error", &format!("polars/df: column '{}' values must be an array", col_name)),
             };
             let mut vals = Vec::with_capacity(vals_len);
             for j in 0..vals_len {
                 vals.push(a.get_array_item(vals_v, j));
             }
-            let series = match elle_values_to_series(&col_name, &vals, "polars/df") {
+            let series = match elle_values_to_series(ctx, &col_name, &vals, "polars/df") {
                 Ok(s) => s,
                 Err(e) => return e,
             };
@@ -255,87 +256,87 @@ extern "C" fn prim_df(args: *const ElleValue, nargs: usize) -> ElleResult {
         }
         let columns: Vec<Column> = columns.into_iter().map(Column::from).collect();
         return match DataFrame::new(columns) {
-            Ok(df) => a.ok(a.external("polars/df", DfWrap(df))),
-            Err(e) => a.err("polars-error", &format!("polars/df: {}", e)),
+            Ok(df) => a.ok(a.external(ctx, "polars/df", DfWrap(df))),
+            Err(e) => a.err(ctx, "polars-error", &format!("polars/df: {}", e)),
         };
     }
     // Struct path
-    match elle_struct_to_columns(v, "polars/df") {
+    match elle_struct_to_columns(ctx, v, "polars/df") {
         Ok(columns) => {
             let columns: Vec<Column> = columns.into_iter().map(Column::from).collect();
             match DataFrame::new(columns) {
-                Ok(df) => a.ok(a.external("polars/df", DfWrap(df))),
-                Err(e) => a.err("polars-error", &format!("polars/df: {}", e)),
+                Ok(df) => a.ok(a.external(ctx, "polars/df", DfWrap(df))),
+                Err(e) => a.err(ctx, "polars-error", &format!("polars/df: {}", e)),
             }
         }
         Err(e) => e,
     }
 }
 
-extern "C" fn prim_read_csv(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_read_csv(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let text = match extract_string(unsafe { a.arg(args, nargs, 0) }, "polars/read-csv") {
+    let text = match extract_string(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/read-csv") {
         Ok(s) => s, Err(e) => return e,
     };
     let cursor = Cursor::new(text.into_bytes());
     match CsvReader::new(cursor).finish() {
-        Ok(df) => a.ok(a.external("polars/df", DfWrap(df))),
-        Err(e) => a.err("polars-error", &format!("polars/read-csv: {}", e)),
+        Ok(df) => a.ok(a.external(ctx, "polars/df", DfWrap(df))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/read-csv: {}", e)),
     }
 }
 
-extern "C" fn prim_write_csv(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_write_csv(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/write-csv") {
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/write-csv") {
         Ok(d) => d, Err(e) => return e,
     };
     let mut buf = Vec::new();
     let mut df_clone = df.0.clone();
     match CsvWriter::new(&mut buf).finish(&mut df_clone) {
         Ok(_) => match String::from_utf8(buf) {
-            Ok(s) => a.ok(a.string(&s)),
-            Err(e) => a.err("polars-error", &format!("polars/write-csv: {}", e)),
+            Ok(s) => a.ok(a.string(ctx, &s)),
+            Err(e) => a.err(ctx, "polars-error", &format!("polars/write-csv: {}", e)),
         },
-        Err(e) => a.err("polars-error", &format!("polars/write-csv: {}", e)),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/write-csv: {}", e)),
     }
 }
 
-extern "C" fn prim_read_parquet(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_read_parquet(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let bytes = match a.get_bytes(v) {
         Some(b) => b.to_vec(),
-        None => return a.err("type-error", &format!("polars/read-parquet: expected bytes, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("polars/read-parquet: expected bytes, got {}", a.type_name(v))),
     };
     let cursor = Cursor::new(bytes);
     match ParquetReader::new(cursor).finish() {
-        Ok(df) => a.ok(a.external("polars/df", DfWrap(df))),
-        Err(e) => a.err("polars-error", &format!("polars/read-parquet: {}", e)),
+        Ok(df) => a.ok(a.external(ctx, "polars/df", DfWrap(df))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/read-parquet: {}", e)),
     }
 }
 
-extern "C" fn prim_write_parquet(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_write_parquet(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/write-parquet") {
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/write-parquet") {
         Ok(d) => d, Err(e) => return e,
     };
     let mut buf = Vec::new();
     let mut df_clone = df.0.clone();
     match ParquetWriter::new(&mut buf).finish(&mut df_clone) {
-        Ok(_) => a.ok(a.bytes(&buf)),
-        Err(e) => a.err("polars-error", &format!("polars/write-parquet: {}", e)),
+        Ok(_) => a.ok(a.bytes(ctx, &buf)),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/write-parquet: {}", e)),
     }
 }
 
-extern "C" fn prim_read_json(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_read_json(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let text = match extract_string(unsafe { a.arg(args, nargs, 0) }, "polars/read-json") {
+    let text = match extract_string(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/read-json") {
         Ok(s) => s, Err(e) => return e,
     };
     let cursor = Cursor::new(text.into_bytes());
     match JsonReader::new(cursor).finish() {
-        Ok(df) => a.ok(a.external("polars/df", DfWrap(df))),
-        Err(e) => a.err("polars-error", &format!("polars/read-json: {}", e)),
+        Ok(df) => a.ok(a.external(ctx, "polars/df", DfWrap(df))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/read-json: {}", e)),
     }
 }
 
@@ -343,60 +344,60 @@ extern "C" fn prim_read_json(args: *const ElleValue, nargs: usize) -> ElleResult
 // Primitives — DataFrame inspection
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_shape(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_shape(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/shape") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/shape") { Ok(d) => d, Err(e) => return e };
     let (rows, cols) = df.0.shape();
-    a.ok(a.array(&[a.int(rows as i64), a.int(cols as i64)]))
+    a.ok(a.array(ctx, &[a.int(rows as i64), a.int(cols as i64)]))
 }
 
-extern "C" fn prim_columns(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_columns(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/columns") { Ok(d) => d, Err(e) => return e };
-    let names: Vec<ElleValue> = df.0.get_column_names().iter().map(|n| a.string(n.as_str())).collect();
-    a.ok(a.array(&names))
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/columns") { Ok(d) => d, Err(e) => return e };
+    let names: Vec<ElleValue> = df.0.get_column_names().iter().map(|n| a.string(ctx, n.as_str())).collect();
+    a.ok(a.array(ctx, &names))
 }
 
-extern "C" fn prim_dtypes(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_dtypes(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/dtypes") { Ok(d) => d, Err(e) => return e };
-    let types: Vec<ElleValue> = df.0.dtypes().iter().map(|dt| a.string(&format!("{}", dt))).collect();
-    a.ok(a.array(&types))
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/dtypes") { Ok(d) => d, Err(e) => return e };
+    let types: Vec<ElleValue> = df.0.dtypes().iter().map(|dt| a.string(ctx, &format!("{}", dt))).collect();
+    a.ok(a.array(ctx, &types))
 }
 
-extern "C" fn prim_head(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_head(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/head") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/head") { Ok(d) => d, Err(e) => return e };
     let n = if nargs > 1 { a.get_int(unsafe { a.arg(args, nargs, 1) }).unwrap_or(5) as usize } else { 5 };
-    a.ok(a.external("polars/df", DfWrap(df.0.head(Some(n)))))
+    a.ok(a.external(ctx, "polars/df", DfWrap(df.0.head(Some(n)))))
 }
 
-extern "C" fn prim_tail(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_tail(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/tail") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/tail") { Ok(d) => d, Err(e) => return e };
     let n = if nargs > 1 { a.get_int(unsafe { a.arg(args, nargs, 1) }).unwrap_or(5) as usize } else { 5 };
-    a.ok(a.external("polars/df", DfWrap(df.0.tail(Some(n)))))
+    a.ok(a.external(ctx, "polars/df", DfWrap(df.0.tail(Some(n)))))
 }
 
-extern "C" fn prim_display(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_display(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/display") { Ok(d) => d, Err(e) => return e };
-    a.ok(a.string(&format!("{}", df.0)))
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/display") { Ok(d) => d, Err(e) => return e };
+    a.ok(a.string(ctx, &format!("{}", df.0)))
 }
 
-extern "C" fn prim_to_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_to_rows(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/to-rows") { Ok(d) => d, Err(e) => return e };
-    a.ok(df_to_elle(&df.0))
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/to-rows") { Ok(d) => d, Err(e) => return e };
+    a.ok(df_to_elle(ctx, &df.0))
 }
 
-extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_column(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/column") { Ok(d) => d, Err(e) => return e };
-    let col_name = match extract_string(unsafe { a.arg(args, nargs, 1) }, "polars/column") { Ok(s) => s, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/column") { Ok(d) => d, Err(e) => return e };
+    let col_name = match extract_string(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/column") { Ok(s) => s, Err(e) => return e };
     match df.0.column(&col_name) {
-        Ok(s) => a.ok(a.array(&series_to_elle(s.as_materialized_series()))),
-        Err(e) => a.err("polars-error", &format!("polars/column: {}", e)),
+        Ok(s) => a.ok(a.array(ctx, &series_to_elle(ctx, s.as_materialized_series()))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/column: {}", e)),
     }
 }
 
@@ -404,100 +405,100 @@ extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
 // Primitives — DataFrame operations
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_select(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_select(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/select") { Ok(d) => d, Err(e) => return e };
-    let cols = match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/select") { Ok(c) => c, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/select") { Ok(d) => d, Err(e) => return e };
+    let cols = match extract_string_list(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/select") { Ok(c) => c, Err(e) => return e };
     match df.0.select(&cols) {
-        Ok(result) => a.ok(a.external("polars/df", DfWrap(result))),
-        Err(e) => a.err("polars-error", &format!("polars/select: {}", e)),
+        Ok(result) => a.ok(a.external(ctx, "polars/df", DfWrap(result))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/select: {}", e)),
     }
 }
 
-extern "C" fn prim_drop(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_drop(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/drop") { Ok(d) => d, Err(e) => return e };
-    let cols = match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/drop") { Ok(c) => c, Err(e) => return e };
-    a.ok(a.external("polars/df", DfWrap(df.0.drop_many(&cols))))
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/drop") { Ok(d) => d, Err(e) => return e };
+    let cols = match extract_string_list(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/drop") { Ok(c) => c, Err(e) => return e };
+    a.ok(a.external(ctx, "polars/df", DfWrap(df.0.drop_many(&cols))))
 }
 
-extern "C" fn prim_rename(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_rename(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/rename") { Ok(d) => d, Err(e) => return e };
-    let from = match extract_string(unsafe { a.arg(args, nargs, 1) }, "polars/rename") { Ok(s) => s, Err(e) => return e };
-    let to = match extract_string(unsafe { a.arg(args, nargs, 2) }, "polars/rename") { Ok(s) => s, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/rename") { Ok(d) => d, Err(e) => return e };
+    let from = match extract_string(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/rename") { Ok(s) => s, Err(e) => return e };
+    let to = match extract_string(ctx, unsafe { a.arg(args, nargs, 2) }, "polars/rename") { Ok(s) => s, Err(e) => return e };
     let mut result = df.0.clone();
     match result.rename(&from, PlSmallStr::from(to.as_str())) {
-        Ok(_) => a.ok(a.external("polars/df", DfWrap(result))),
-        Err(e) => a.err("polars-error", &format!("polars/rename: {}", e)),
+        Ok(_) => a.ok(a.external(ctx, "polars/df", DfWrap(result))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/rename: {}", e)),
     }
 }
 
-extern "C" fn prim_slice(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_slice(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/slice") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/slice") { Ok(d) => d, Err(e) => return e };
     let offset = a.get_int(unsafe { a.arg(args, nargs, 1) }).unwrap_or(0);
     let length = a.get_int(unsafe { a.arg(args, nargs, 2) }).unwrap_or(0) as usize;
-    a.ok(a.external("polars/df", DfWrap(df.0.slice(offset, length))))
+    a.ok(a.external(ctx, "polars/df", DfWrap(df.0.slice(offset, length))))
 }
 
-extern "C" fn prim_sample(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_sample(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/sample") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/sample") { Ok(d) => d, Err(e) => return e };
     let n = a.get_int(unsafe { a.arg(args, nargs, 1) }).unwrap_or(1) as usize;
     match df.0.sample_n_literal(n, false, false, None) {
-        Ok(result) => a.ok(a.external("polars/df", DfWrap(result))),
-        Err(e) => a.err("polars-error", &format!("polars/sample: {}", e)),
+        Ok(result) => a.ok(a.external(ctx, "polars/df", DfWrap(result))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/sample: {}", e)),
     }
 }
 
-extern "C" fn prim_sort(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_sort(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/sort") { Ok(d) => d, Err(e) => return e };
-    let col_s = match extract_string(unsafe { a.arg(args, nargs, 1) }, "polars/sort") { Ok(s) => s, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/sort") { Ok(d) => d, Err(e) => return e };
+    let col_s = match extract_string(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/sort") { Ok(s) => s, Err(e) => return e };
     let descending = if nargs > 2 {
         a.get_string(unsafe { a.arg(args, nargs, 2) }).map(|s| s == "desc").unwrap_or(false)
     } else { false };
     match df.0.sort([col_s.as_str()], SortMultipleOptions::new().with_order_descending(descending)) {
-        Ok(result) => a.ok(a.external("polars/df", DfWrap(result))),
-        Err(e) => a.err("polars-error", &format!("polars/sort: {}", e)),
+        Ok(result) => a.ok(a.external(ctx, "polars/df", DfWrap(result))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/sort: {}", e)),
     }
 }
 
-extern "C" fn prim_unique(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_unique(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/unique") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/unique") { Ok(d) => d, Err(e) => return e };
     let cols = if nargs > 1 {
-        match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/unique") { Ok(c) => Some(c), Err(e) => return e }
+        match extract_string_list(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/unique") { Ok(c) => Some(c), Err(e) => return e }
     } else { None };
     let result = match cols {
         Some(ref c) => df.0.unique::<&[String], String>(Some(c.as_slice()), UniqueKeepStrategy::First, None),
         None => df.0.unique::<&[String], String>(None, UniqueKeepStrategy::First, None),
     };
     match result {
-        Ok(r) => a.ok(a.external("polars/df", DfWrap(r))),
-        Err(e) => a.err("polars-error", &format!("polars/unique: {}", e)),
+        Ok(r) => a.ok(a.external(ctx, "polars/df", DfWrap(r))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/unique: {}", e)),
     }
 }
 
-extern "C" fn prim_vstack(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_vstack(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df1 = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/vstack") { Ok(d) => d, Err(e) => return e };
-    let df2 = match get_df(unsafe { a.arg(args, nargs, 1) }, "polars/vstack") { Ok(d) => d, Err(e) => return e };
+    let df1 = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/vstack") { Ok(d) => d, Err(e) => return e };
+    let df2 = match get_df(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/vstack") { Ok(d) => d, Err(e) => return e };
     match df1.0.vstack(&df2.0) {
-        Ok(stacked) => a.ok(a.external("polars/df", DfWrap(stacked))),
-        Err(e) => a.err("polars-error", &format!("polars/vstack: {}", e)),
+        Ok(stacked) => a.ok(a.external(ctx, "polars/df", DfWrap(stacked))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/vstack: {}", e)),
     }
 }
 
-extern "C" fn prim_hstack(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_hstack(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df1 = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/hstack") { Ok(d) => d, Err(e) => return e };
-    let df2 = match get_df(unsafe { a.arg(args, nargs, 1) }, "polars/hstack") { Ok(d) => d, Err(e) => return e };
+    let df1 = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/hstack") { Ok(d) => d, Err(e) => return e };
+    let df2 = match get_df(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/hstack") { Ok(d) => d, Err(e) => return e };
     let cols: Vec<Column> = df2.0.get_columns().to_vec();
     match df1.0.hstack(&cols) {
-        Ok(result) => a.ok(a.external("polars/df", DfWrap(result))),
-        Err(e) => a.err("polars-error", &format!("polars/hstack: {}", e)),
+        Ok(result) => a.ok(a.external(ctx, "polars/df", DfWrap(result))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/hstack: {}", e)),
     }
 }
 
@@ -505,34 +506,34 @@ extern "C" fn prim_hstack(args: *const ElleValue, nargs: usize) -> ElleResult {
 // Primitives — Lazy API
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_lazy(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_lazy(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/lazy") { Ok(d) => d, Err(e) => return e };
-    a.ok(a.external("polars/lazy", LazyWrap(df.0.clone().lazy())))
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/lazy") { Ok(d) => d, Err(e) => return e };
+    a.ok(a.external(ctx, "polars/lazy", LazyWrap(df.0.clone().lazy())))
 }
 
-extern "C" fn prim_collect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_collect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/collect") { Ok(l) => l, Err(e) => return e };
+    let lazy = match get_lazy(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/collect") { Ok(l) => l, Err(e) => return e };
     match lazy.0.clone().collect() {
-        Ok(df) => a.ok(a.external("polars/df", DfWrap(df))),
-        Err(e) => a.err("polars-error", &format!("polars/collect: {}", e)),
+        Ok(df) => a.ok(a.external(ctx, "polars/df", DfWrap(df))),
+        Err(e) => a.err(ctx, "polars-error", &format!("polars/collect: {}", e)),
     }
 }
 
-extern "C" fn prim_lselect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_lselect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/lselect") { Ok(l) => l, Err(e) => return e };
-    let cols = match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/lselect") { Ok(c) => c, Err(e) => return e };
+    let lazy = match get_lazy(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/lselect") { Ok(l) => l, Err(e) => return e };
+    let cols = match extract_string_list(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/lselect") { Ok(c) => c, Err(e) => return e };
     let exprs: Vec<Expr> = cols.iter().map(|c| col(c.as_str())).collect();
-    a.ok(a.external("polars/lazy", LazyWrap(lazy.0.clone().select(exprs))))
+    a.ok(a.external(ctx, "polars/lazy", LazyWrap(lazy.0.clone().select(exprs))))
 }
 
-extern "C" fn prim_lfilter(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_lfilter(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/lfilter") { Ok(l) => l, Err(e) => return e };
-    let col_name = match extract_string(unsafe { a.arg(args, nargs, 1) }, "polars/lfilter") { Ok(s) => s, Err(e) => return e };
-    let op = match extract_string(unsafe { a.arg(args, nargs, 2) }, "polars/lfilter") { Ok(s) => s, Err(e) => return e };
+    let lazy = match get_lazy(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/lfilter") { Ok(l) => l, Err(e) => return e };
+    let col_name = match extract_string(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/lfilter") { Ok(s) => s, Err(e) => return e };
+    let op = match extract_string(ctx, unsafe { a.arg(args, nargs, 2) }, "polars/lfilter") { Ok(s) => s, Err(e) => return e };
     let val = unsafe { a.arg(args, nargs, 3) };
 
     let column = col(col_name.as_str());
@@ -542,7 +543,7 @@ extern "C" fn prim_lfilter(args: *const ElleValue, nargs: usize) -> ElleResult {
             "=" | "==" => column.eq(lit_val), "!=" => column.neq(lit_val),
             "<" => column.lt(lit_val), ">" => column.gt(lit_val),
             "<=" => column.lt_eq(lit_val), ">=" => column.gt_eq(lit_val),
-            _ => return a.err("polars-error", &format!("polars/lfilter: unknown op '{}'", op)),
+            _ => return a.err(ctx, "polars-error", &format!("polars/lfilter: unknown op '{}'", op)),
         }
     } else if let Some(f) = a.get_float(val) {
         let lit_val = lit(f);
@@ -550,7 +551,7 @@ extern "C" fn prim_lfilter(args: *const ElleValue, nargs: usize) -> ElleResult {
             "=" | "==" => column.eq(lit_val), "!=" => column.neq(lit_val),
             "<" => column.lt(lit_val), ">" => column.gt(lit_val),
             "<=" => column.lt_eq(lit_val), ">=" => column.gt_eq(lit_val),
-            _ => return a.err("polars-error", &format!("polars/lfilter: unknown op '{}'", op)),
+            _ => return a.err(ctx, "polars-error", &format!("polars/lfilter: unknown op '{}'", op)),
         }
     } else if let Some(s) = a.get_string(val) {
         let lit_val = lit(s.to_string());
@@ -558,77 +559,77 @@ extern "C" fn prim_lfilter(args: *const ElleValue, nargs: usize) -> ElleResult {
             "=" | "==" => column.eq(lit_val), "!=" => column.neq(lit_val),
             "<" => column.lt(lit_val), ">" => column.gt(lit_val),
             "<=" => column.lt_eq(lit_val), ">=" => column.gt_eq(lit_val),
-            _ => return a.err("polars-error", &format!("polars/lfilter: unknown op '{}'", op)),
+            _ => return a.err(ctx, "polars-error", &format!("polars/lfilter: unknown op '{}'", op)),
         }
     } else {
-        return a.err("type-error", "polars/lfilter: unsupported filter value type");
+        return a.err(ctx, "type-error", "polars/lfilter: unsupported filter value type");
     };
-    a.ok(a.external("polars/lazy", LazyWrap(lazy.0.clone().filter(predicate))))
+    a.ok(a.external(ctx, "polars/lazy", LazyWrap(lazy.0.clone().filter(predicate))))
 }
 
-extern "C" fn prim_lsort(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_lsort(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/lsort") { Ok(l) => l, Err(e) => return e };
-    let col_name = match extract_string(unsafe { a.arg(args, nargs, 1) }, "polars/lsort") { Ok(s) => s, Err(e) => return e };
+    let lazy = match get_lazy(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/lsort") { Ok(l) => l, Err(e) => return e };
+    let col_name = match extract_string(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/lsort") { Ok(s) => s, Err(e) => return e };
     let descending = if nargs > 2 {
         a.get_string(unsafe { a.arg(args, nargs, 2) }).map(|s| s == "desc").unwrap_or(false)
     } else { false };
     let result = lazy.0.clone().sort([col_name.as_str()], SortMultipleOptions::new().with_order_descending(descending));
-    a.ok(a.external("polars/lazy", LazyWrap(result)))
+    a.ok(a.external(ctx, "polars/lazy", LazyWrap(result)))
 }
 
-extern "C" fn prim_lgroupby(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_lgroupby(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let _lazy = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/lgroupby") { Ok(l) => l, Err(e) => return e };
-    let _group_cols = match extract_string_list(unsafe { a.arg(args, nargs, 1) }, "polars/lgroupby") { Ok(c) => c, Err(e) => return e };
+    let _lazy = match get_lazy(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/lgroupby") { Ok(l) => l, Err(e) => return e };
+    let _group_cols = match extract_string_list(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/lgroupby") { Ok(c) => c, Err(e) => return e };
 
     // Parse aggregation specs from the struct - we need to access struct fields by known keys
     // Since we can't iterate struct fields, lgroupby needs aggs passed differently.
     // For now, return a helpful error since struct iteration isn't available.
     let aggs_v = unsafe { a.arg(args, nargs, 2) };
     if !a.check_struct(aggs_v) {
-        return a.err("type-error", "polars/lgroupby: aggs must be a struct");
+        return a.err(ctx, "type-error", "polars/lgroupby: aggs must be a struct");
     }
     // Struct iteration not available in stable ABI - return error
-    a.err("polars-error", "polars/lgroupby: struct iteration not supported in stable ABI; use polars/read-csv + polars/collect pipeline instead")
+    a.err(ctx, "polars-error", "polars/lgroupby: struct iteration not supported in stable ABI; use polars/read-csv + polars/collect pipeline instead")
 }
 
-extern "C" fn prim_ljoin(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ljoin(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let left = match get_lazy(unsafe { a.arg(args, nargs, 0) }, "polars/ljoin") { Ok(l) => l, Err(e) => return e };
-    let right = match get_lazy(unsafe { a.arg(args, nargs, 1) }, "polars/ljoin") { Ok(l) => l, Err(e) => return e };
-    let on_cols = match extract_string_list(unsafe { a.arg(args, nargs, 2) }, "polars/ljoin") { Ok(c) => c, Err(e) => return e };
+    let left = match get_lazy(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/ljoin") { Ok(l) => l, Err(e) => return e };
+    let right = match get_lazy(ctx, unsafe { a.arg(args, nargs, 1) }, "polars/ljoin") { Ok(l) => l, Err(e) => return e };
+    let on_cols = match extract_string_list(ctx, unsafe { a.arg(args, nargs, 2) }, "polars/ljoin") { Ok(c) => c, Err(e) => return e };
     let how_str = if nargs > 3 {
-        match extract_string(unsafe { a.arg(args, nargs, 3) }, "polars/ljoin") { Ok(s) => s, Err(e) => return e }
+        match extract_string(ctx, unsafe { a.arg(args, nargs, 3) }, "polars/ljoin") { Ok(s) => s, Err(e) => return e }
     } else { "inner".into() };
     let how = match how_str.as_str() {
         "inner" => JoinType::Inner, "left" => JoinType::Left,
         "full" | "outer" => JoinType::Full, "cross" => JoinType::Cross,
-        other => return a.err("polars-error", &format!("polars/ljoin: unknown join type '{}'", other)),
+        other => return a.err(ctx, "polars-error", &format!("polars/ljoin: unknown join type '{}'", other)),
     };
     let on_exprs: Vec<Expr> = on_cols.iter().map(|c| col(c.as_str())).collect();
     let result = left.0.clone().join(right.0.clone(), on_exprs.clone(), on_exprs, JoinArgs::new(how));
-    a.ok(a.external("polars/lazy", LazyWrap(result)))
+    a.ok(a.external(ctx, "polars/lazy", LazyWrap(result)))
 }
 
 // ---------------------------------------------------------------------------
 // Primitives — Describe / stats
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_describe(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_describe(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let df = match get_df(unsafe { a.arg(args, nargs, 0) }, "polars/describe") { Ok(d) => d, Err(e) => return e };
+    let df = match get_df(ctx, unsafe { a.arg(args, nargs, 0) }, "polars/describe") { Ok(d) => d, Err(e) => return e };
     let mut stat_rows: Vec<ElleValue> = Vec::new();
     for c in df.0.get_columns() {
         let s = c.as_materialized_series();
-        stat_rows.push(a.build_struct(&[
-            ("column", a.string(s.name().as_str())),
-            ("dtype", a.string(&format!("{}", s.dtype()))),
+        stat_rows.push(a.build_struct(ctx, &[
+            ("column", a.string(ctx, s.name().as_str())),
+            ("dtype", a.string(ctx, &format!("{}", s.dtype()))),
             ("count", a.int(s.len() as i64)),
             ("null_count", a.int(s.null_count() as i64)),
         ]));
     }
-    a.ok(a.array(&stat_rows))
+    a.ok(a.array(ctx, &stat_rows))
 }
 
 // ---------------------------------------------------------------------------
