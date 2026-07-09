@@ -10,7 +10,7 @@ use sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512};
 use std::cell::RefCell;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -22,7 +22,15 @@ elle_plugin::define_plugin!("hash/", &PRIMITIVES);
 // ---------------------------------------------------------------------------
 
 /// Extract byte data from a string or bytes value.
-fn extract_bytes(val: ElleValue, name: &str, pos: &str) -> Result<Vec<u8>, ElleResult> {
+///
+/// Threads the per-call `ctx` so any error value it builds is allocated into
+/// the calling primitive's region (ABI v3).
+fn extract_bytes(
+    ctx: *mut ElleCtx,
+    val: ElleValue,
+    name: &str,
+    pos: &str,
+) -> Result<Vec<u8>, ElleResult> {
     let a = api();
     if let Some(s) = a.get_string(val) {
         Ok(s.as_bytes().to_vec())
@@ -30,6 +38,7 @@ fn extract_bytes(val: ElleValue, name: &str, pos: &str) -> Result<Vec<u8>, ElleR
         Ok(b.to_vec())
     } else {
         Err(a.err(
+            ctx,
             "type-error",
             &format!(
                 "{}: {} must be string or bytes, got {}",
@@ -42,12 +51,18 @@ fn extract_bytes(val: ElleValue, name: &str, pos: &str) -> Result<Vec<u8>, ElleR
 }
 
 /// Extract a string from a Value, or return a type error.
-fn extract_string(val: ElleValue, name: &str, pos: &str) -> Result<String, ElleResult> {
+fn extract_string(
+    ctx: *mut ElleCtx,
+    val: ElleValue,
+    name: &str,
+    pos: &str,
+) -> Result<String, ElleResult> {
     let a = api();
     a.get_string(val)
         .map(|s| s.to_string())
         .ok_or_else(|| {
             a.err(
+                ctx,
                 "type-error",
                 &format!(
                     "{}: {} must be a string, got {}",
@@ -60,15 +75,21 @@ fn extract_string(val: ElleValue, name: &str, pos: &str) -> Result<String, ElleR
 }
 
 /// Check arity and extract byte data for a unary hash primitive.
-fn oneshot_args(args: *const ElleValue, nargs: usize, name: &str) -> Result<Vec<u8>, ElleResult> {
+fn oneshot_args(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+    name: &str,
+) -> Result<Vec<u8>, ElleResult> {
     let a = api();
     if nargs != 1 {
         return Err(a.err(
+            ctx,
             "arity-error",
             &format!("{}: expected 1 argument, got {}", name, nargs),
         ));
     }
-    extract_bytes(unsafe { a.arg(args, nargs, 0) }, name, "argument")
+    extract_bytes(ctx, unsafe { a.arg(args, nargs, 0) }, name, "argument")
 }
 
 // ---------------------------------------------------------------------------
@@ -77,10 +98,14 @@ fn oneshot_args(args: *const ElleValue, nargs: usize, name: &str) -> Result<Vec<
 
 macro_rules! digest_prim {
     ($fn_name:ident, $hasher:ty, $prim_name:expr) => {
-        extern "C" fn $fn_name(args: *const ElleValue, nargs: usize) -> ElleResult {
+        extern "C" fn $fn_name(
+            ctx: *mut ElleCtx,
+            args: *const ElleValue,
+            nargs: usize,
+        ) -> ElleResult {
             let a = api();
-            match oneshot_args(args, nargs, $prim_name) {
-                Ok(data) => a.ok(a.bytes(&<$hasher>::digest(&data).to_vec())),
+            match oneshot_args(ctx, args, nargs, $prim_name) {
+                Ok(data) => a.ok(a.bytes(ctx, &<$hasher>::digest(&data).to_vec())),
                 Err(e) => e,
             }
         }
@@ -106,28 +131,34 @@ digest_prim!(prim_blake2s256, Blake2s256, "hash/blake2s-256");
 // BLAKE3 one-shot (own API, not RustCrypto Digest)
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_blake3(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_blake3(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    match oneshot_args(args, nargs, "hash/blake3") {
-        Ok(data) => a.ok(a.bytes(blake3::hash(&data).as_bytes())),
+    match oneshot_args(ctx, args, nargs, "hash/blake3") {
+        Ok(data) => a.ok(a.bytes(ctx, blake3::hash(&data).as_bytes())),
         Err(e) => e,
     }
 }
 
-extern "C" fn prim_blake3_keyed(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_blake3_keyed(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
     let a = api();
     if nargs != 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("hash/blake3-keyed: expected 2 arguments, got {}", nargs),
         );
     }
-    let key = match extract_bytes(unsafe { a.arg(args, nargs, 0) }, "hash/blake3-keyed", "key") {
+    let key = match extract_bytes(ctx, unsafe { a.arg(args, nargs, 0) }, "hash/blake3-keyed", "key") {
         Ok(d) => d,
         Err(e) => return e,
     };
     if key.len() != 32 {
         return a.err(
+            ctx,
             "value-error",
             &format!(
                 "hash/blake3-keyed: key must be exactly 32 bytes, got {}",
@@ -135,40 +166,45 @@ extern "C" fn prim_blake3_keyed(args: *const ElleValue, nargs: usize) -> ElleRes
             ),
         );
     }
-    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/blake3-keyed", "data") {
+    let data = match extract_bytes(ctx, unsafe { a.arg(args, nargs, 1) }, "hash/blake3-keyed", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
     let key_arr: [u8; 32] = key.try_into().unwrap();
-    a.ok(a.bytes(blake3::keyed_hash(&key_arr, &data).as_bytes()))
+    a.ok(a.bytes(ctx, blake3::keyed_hash(&key_arr, &data).as_bytes()))
 }
 
-extern "C" fn prim_blake3_derive(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_blake3_derive(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
     let a = api();
     if nargs != 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("hash/blake3-derive: expected 2 arguments, got {}", nargs),
         );
     }
-    let context = match extract_string(unsafe { a.arg(args, nargs, 0) }, "hash/blake3-derive", "context") {
+    let context = match extract_string(ctx, unsafe { a.arg(args, nargs, 0) }, "hash/blake3-derive", "context") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/blake3-derive", "data") {
+    let data = match extract_bytes(ctx, unsafe { a.arg(args, nargs, 1) }, "hash/blake3-derive", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
-    a.ok(a.bytes(&blake3::derive_key(&context, &data)))
+    a.ok(a.bytes(ctx, &blake3::derive_key(&context, &data)))
 }
 
 // ---------------------------------------------------------------------------
 // CRC32 and xxHash one-shot (return integers or bytes)
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_crc32(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_crc32(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    match oneshot_args(args, nargs, "hash/crc32") {
+    match oneshot_args(ctx, args, nargs, "hash/crc32") {
         Ok(data) => {
             let mut h = Crc32::new();
             h.update(&data);
@@ -178,26 +214,26 @@ extern "C" fn prim_crc32(args: *const ElleValue, nargs: usize) -> ElleResult {
     }
 }
 
-extern "C" fn prim_xxh32(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xxh32(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    match oneshot_args(args, nargs, "hash/xxh32") {
+    match oneshot_args(ctx, args, nargs, "hash/xxh32") {
         Ok(data) => a.ok(a.int(xxhash_rust::xxh32::xxh32(&data, 0) as i64)),
         Err(e) => e,
     }
 }
 
-extern "C" fn prim_xxh64(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xxh64(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    match oneshot_args(args, nargs, "hash/xxh64") {
+    match oneshot_args(ctx, args, nargs, "hash/xxh64") {
         Ok(data) => a.ok(a.int(xxhash_rust::xxh3::xxh3_64(&data) as i64)),
         Err(e) => e,
     }
 }
 
-extern "C" fn prim_xxh128(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xxh128(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    match oneshot_args(args, nargs, "hash/xxh128") {
-        Ok(data) => a.ok(a.bytes(&xxhash_rust::xxh3::xxh3_128(&data).to_be_bytes())),
+    match oneshot_args(ctx, args, nargs, "hash/xxh128") {
+        Ok(data) => a.ok(a.bytes(ctx, &xxhash_rust::xxh3::xxh3_128(&data).to_be_bytes())),
         Err(e) => e,
     }
 }
@@ -229,10 +265,11 @@ const ALGORITHM_NAMES: &[&str] = &[
     "xxh128",
 ];
 
-extern "C" fn prim_hex(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_hex(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("hash/hex: expected 2 arguments, got {}", nargs),
         );
@@ -242,6 +279,7 @@ extern "C" fn prim_hex(args: *const ElleValue, nargs: usize) -> ElleResult {
         Some(k) => k.to_string(),
         None => {
             return a.err(
+                ctx,
                 "type-error",
                 &format!(
                     "hash/hex: first argument must be a keyword, got {}",
@@ -250,37 +288,41 @@ extern "C" fn prim_hex(args: *const ElleValue, nargs: usize) -> ElleResult {
             );
         }
     };
-    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/hex", "data") {
+    let data = match extract_bytes(ctx, unsafe { a.arg(args, nargs, 1) }, "hash/hex", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
     // Route through HasherState for consistency with streaming API
-    match make_hasher(&kw) {
+    match make_hasher(ctx, &kw) {
         Ok(mut state) => {
             state.update(&data);
-            let digest = state.finalize_reset(a);
+            let digest = state.finalize_reset(ctx, a);
             // Check if bytes or int
             if let Some(b) = a.get_bytes(digest) {
                 let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
-                a.ok(a.string(&hex))
+                a.ok(a.string(ctx, &hex))
             } else if let Some(n) = a.get_int(digest) {
                 let hex = format!("{:x}", n);
-                a.ok(a.string(&hex))
+                a.ok(a.string(ctx, &hex))
             } else {
-                a.ok(a.string(""))
+                a.ok(a.string(ctx, ""))
             }
         }
         Err(e) => e,
     }
 }
 
-extern "C" fn prim_algorithms(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_algorithms(
+    ctx: *mut ElleCtx,
+    _args: *const ElleValue,
+    _nargs: usize,
+) -> ElleResult {
     let a = api();
     let elems: Vec<ElleValue> = ALGORITHM_NAMES
         .iter()
         .map(|name| a.keyword(name))
         .collect();
-    a.ok(a.set(&elems))
+    a.ok(a.set(ctx, &elems))
 }
 
 // ---------------------------------------------------------------------------
@@ -342,14 +384,17 @@ impl HasherState {
     }
 
     /// Finalize and reset to a fresh hasher of the same algorithm.
-    fn finalize_reset(&mut self, a: &elle_plugin::Api) -> ElleValue {
+    ///
+    /// Threads the per-call `ctx` because the digest it returns (bytes for
+    /// most algorithms) is allocated into the caller's region (ABI v3).
+    fn finalize_reset(&mut self, ctx: *mut ElleCtx, a: &elle_plugin::Api) -> ElleValue {
         // The 14 Digest-compatible types all share finalize_reset -> bytes.
         // BLAKE3, CRC32, and xxHash each need custom finalize + reset logic.
         match self {
             Self::Blake3(h) => {
                 let r = h.finalize();
                 h.reset();
-                a.bytes(r.as_bytes())
+                a.bytes(ctx, r.as_bytes())
             }
             Self::Crc32(h) => {
                 let r = h.clone().finalize();
@@ -369,29 +414,31 @@ impl HasherState {
             Self::Xxh3(h) => {
                 let r = h.digest128();
                 *h = xxhash_rust::xxh3::Xxh3Default::new();
-                a.bytes(&r.to_be_bytes())
+                a.bytes(ctx, &r.to_be_bytes())
             }
             // All Digest types: finalize_reset returns GenericArray -> to_vec
-            Self::Md5(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha1(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha224(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha256(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha384(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha512(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha512_224(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha512_256(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha3_224(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha3_256(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha3_384(h) => a.bytes(&h.finalize_reset()),
-            Self::Sha3_512(h) => a.bytes(&h.finalize_reset()),
-            Self::Blake2b512(h) => a.bytes(&h.finalize_reset()),
-            Self::Blake2s256(h) => a.bytes(&h.finalize_reset()),
+            Self::Md5(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha1(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha224(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha256(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha384(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha512(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha512_224(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha512_256(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha3_224(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha3_256(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha3_384(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Sha3_512(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Blake2b512(h) => a.bytes(ctx, &h.finalize_reset()),
+            Self::Blake2s256(h) => a.bytes(ctx, &h.finalize_reset()),
         }
     }
 }
 
 /// Create a hasher from an algorithm keyword string.
-fn make_hasher(kw: &str) -> Result<HasherState, ElleResult> {
+///
+/// Threads `ctx` for the error value produced on an unknown algorithm.
+fn make_hasher(ctx: *mut ElleCtx, kw: &str) -> Result<HasherState, ElleResult> {
     match kw {
         "md5" => Ok(HasherState::Md5(Md5::new())),
         "sha1" => Ok(HasherState::Sha1(Sha1::new())),
@@ -415,6 +462,7 @@ fn make_hasher(kw: &str) -> Result<HasherState, ElleResult> {
         _ => {
             let a = api();
             Err(a.err(
+                ctx,
                 "value-error",
                 &format!("hash/new: unknown algorithm :{}", kw),
             ))
@@ -422,10 +470,11 @@ fn make_hasher(kw: &str) -> Result<HasherState, ElleResult> {
     }
 }
 
-extern "C" fn prim_hash_new(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_hash_new(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("hash/new: expected 1 argument, got {}", nargs),
         );
@@ -435,21 +484,27 @@ extern "C" fn prim_hash_new(args: *const ElleValue, nargs: usize) -> ElleResult 
         Some(k) => k.to_string(),
         None => {
             return a.err(
+                ctx,
                 "type-error",
                 &format!("hash/new: expected keyword, got {}", a.type_name(arg0)),
             );
         }
     };
-    match make_hasher(&kw) {
-        Ok(state) => a.ok(a.external("hash/context", RefCell::new(state))),
+    match make_hasher(ctx, &kw) {
+        Ok(state) => a.ok(a.external(ctx, "hash/context", RefCell::new(state))),
         Err(e) => e,
     }
 }
 
-extern "C" fn prim_hash_update(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_hash_update(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
     let a = api();
     if nargs != 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("hash/update: expected 2 arguments, got {}", nargs),
         );
@@ -459,6 +514,7 @@ extern "C" fn prim_hash_update(args: *const ElleValue, nargs: usize) -> ElleResu
         Some(c) => c,
         None => {
             return a.err(
+                ctx,
                 "type-error",
                 &format!(
                     "hash/update: first argument must be a hash context, got {}",
@@ -467,7 +523,7 @@ extern "C" fn prim_hash_update(args: *const ElleValue, nargs: usize) -> ElleResu
             );
         }
     };
-    let data = match extract_bytes(unsafe { a.arg(args, nargs, 1) }, "hash/update", "data") {
+    let data = match extract_bytes(ctx, unsafe { a.arg(args, nargs, 1) }, "hash/update", "data") {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -475,10 +531,15 @@ extern "C" fn prim_hash_update(args: *const ElleValue, nargs: usize) -> ElleResu
     a.ok(arg0)
 }
 
-extern "C" fn prim_hash_finalize(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_hash_finalize(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
     let a = api();
     if nargs != 1 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("hash/finalize: expected 1 argument, got {}", nargs),
         );
@@ -488,6 +549,7 @@ extern "C" fn prim_hash_finalize(args: *const ElleValue, nargs: usize) -> ElleRe
         Some(c) => c,
         None => {
             return a.err(
+                ctx,
                 "type-error",
                 &format!(
                     "hash/finalize: expected a hash context, got {}",
@@ -496,7 +558,7 @@ extern "C" fn prim_hash_finalize(args: *const ElleValue, nargs: usize) -> ElleRe
             );
         }
     };
-    a.ok(cell.borrow_mut().finalize_reset(a))
+    a.ok(cell.borrow_mut().finalize_reset(ctx, a))
 }
 
 // ---------------------------------------------------------------------------
