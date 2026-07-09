@@ -6,7 +6,7 @@ use quick_xml::Writer;
 use std::cell::RefCell;
 use std::io::Cursor;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("xml/", &PRIMITIVES);
 
@@ -21,7 +21,7 @@ struct ParsedElement {
     children: Vec<ElleValue>,
 }
 
-fn attrs_from_start(e: &BytesStart) -> Result<Vec<(String, ElleValue)>, String> {
+fn attrs_from_start(ctx: *mut ElleCtx, e: &BytesStart) -> Result<Vec<(String, ElleValue)>, String> {
     let a = api();
     let mut attrs = Vec::new();
     for attr_result in e.attributes() {
@@ -32,7 +32,7 @@ fn attrs_from_start(e: &BytesStart) -> Result<Vec<(String, ElleValue)>, String> 
                     Ok(v) => v.into_owned(),
                     Err(e) => return Err(format!("xml/parse: attribute decode error: {}", e)),
                 };
-                attrs.push((key, a.string(&val)));
+                attrs.push((key, a.string(ctx, &val)));
             }
             Err(e) => return Err(format!("xml/parse: attribute error: {}", e)),
         }
@@ -40,24 +40,24 @@ fn attrs_from_start(e: &BytesStart) -> Result<Vec<(String, ElleValue)>, String> 
     Ok(attrs)
 }
 
-fn element_to_value(elem: ParsedElement) -> ElleValue {
+fn element_to_value(ctx: *mut ElleCtx, elem: ParsedElement) -> ElleValue {
     let a = api();
     let attrs_kvs: Vec<(&str, ElleValue)> = elem
         .attrs
         .iter()
         .map(|(k, v)| (k.as_str(), *v))
         .collect();
-    let attrs_val = a.build_struct(&attrs_kvs);
-    let children_val = a.array(&elem.children);
-    a.build_struct(&[
-        ("tag", a.string(&elem.tag)),
+    let attrs_val = a.build_struct(ctx, &attrs_kvs);
+    let children_val = a.array(ctx, &elem.children);
+    a.build_struct(ctx, &[
+        ("tag", a.string(ctx, &elem.tag)),
         ("attrs", attrs_val),
         ("children", children_val),
     ])
 }
 
 /// Parse an XML string into an Elle element struct.
-fn parse_xml(input: &str) -> Result<ElleValue, String> {
+fn parse_xml(ctx: *mut ElleCtx, input: &str) -> Result<ElleValue, String> {
     let a = api();
     let mut reader = Reader::from_reader(Cursor::new(input.as_bytes().to_vec()));
     reader.config_mut().trim_text(false);
@@ -71,7 +71,7 @@ fn parse_xml(input: &str) -> Result<ElleValue, String> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                let attrs = attrs_from_start(e)?;
+                let attrs = attrs_from_start(ctx, e)?;
                 stack.push(ParsedElement {
                     tag,
                     attrs,
@@ -83,7 +83,7 @@ fn parse_xml(input: &str) -> Result<ElleValue, String> {
                     Some(e) => e,
                     None => return Err("xml/parse: unexpected closing tag".to_string()),
                 };
-                let value = element_to_value(elem);
+                let value = element_to_value(ctx, elem);
                 if let Some(parent) = stack.last_mut() {
                     parent.children.push(value);
                 } else {
@@ -92,8 +92,8 @@ fn parse_xml(input: &str) -> Result<ElleValue, String> {
             }
             Ok(Event::Empty(ref e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                let attrs = attrs_from_start(e)?;
-                let value = element_to_value(ParsedElement {
+                let attrs = attrs_from_start(ctx, e)?;
+                let value = element_to_value(ctx, ParsedElement {
                     tag,
                     attrs,
                     children: Vec::new(),
@@ -111,7 +111,7 @@ fn parse_xml(input: &str) -> Result<ElleValue, String> {
                 };
                 if !text.is_empty() {
                     if let Some(parent) = stack.last_mut() {
-                        parent.children.push(a.string(&text));
+                        parent.children.push(a.string(ctx, &text));
                     }
                 }
             }
@@ -122,7 +122,7 @@ fn parse_xml(input: &str) -> Result<ElleValue, String> {
                 };
                 if !text.is_empty() {
                     if let Some(parent) = stack.last_mut() {
-                        parent.children.push(a.string(&text));
+                        parent.children.push(a.string(ctx, &text));
                     }
                 }
             }
@@ -272,6 +272,7 @@ struct XmlReaderState {
 }
 
 fn attrs_from_start_streaming(
+    ctx: *mut ElleCtx,
     e: &BytesStart,
 ) -> Result<Vec<(String, ElleValue)>, ElleResult> {
     let a = api();
@@ -283,16 +284,16 @@ fn attrs_from_start_streaming(
                 let val = match attr.unescape_value() {
                     Ok(v) => v.into_owned(),
                     Err(err) => {
-                        return Err(a.err(
+                        return Err(a.err(ctx, 
                             "xml-error",
                             &format!("xml/next-event: attribute decode: {}", err),
                         ));
                     }
                 };
-                attrs.push((key, a.string(&val)));
+                attrs.push((key, a.string(ctx, &val)));
             }
             Err(e) => {
-                return Err(a.err(
+                return Err(a.err(ctx, 
                     "xml-error",
                     &format!("xml/next-event: attribute error: {}", e),
                 ));
@@ -302,13 +303,13 @@ fn attrs_from_start_streaming(
     Ok(attrs)
 }
 
-extern "C" fn prim_xml_reader_new(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xml_reader_new(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let s = match a.get_string(arg0) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "xml/reader-new: expected string, got {}",
@@ -324,16 +325,16 @@ extern "C" fn prim_xml_reader_new(args: *const ElleValue, nargs: usize) -> ElleR
         reader: RefCell::new(reader),
         buf: RefCell::new(Vec::new()),
     };
-    a.ok(a.external("xml-reader", state))
+    a.ok(a.external(ctx, "xml-reader", state))
 }
 
-extern "C" fn prim_xml_next_event(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xml_next_event(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let state = match a.get_external::<XmlReaderState>(arg0, "xml-reader") {
         Some(s) => s,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "xml/next-event: expected xml-reader, got {}",
@@ -364,12 +365,12 @@ extern "C" fn prim_xml_next_event(args: *const ElleValue, nargs: usize) -> ElleR
                 Err(e) => OwnedEvent::Error(format!("xml/next-event: {}", e)),
                 Ok(Event::Start(ref e)) => {
                     let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    let attrs = attrs_from_start_streaming(e);
+                    let attrs = attrs_from_start_streaming(ctx, e);
                     OwnedEvent::Start { tag, attrs }
                 }
                 Ok(Event::Empty(ref e)) => {
                     let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    let attrs = attrs_from_start_streaming(e);
+                    let attrs = attrs_from_start_streaming(ctx, e);
                     OwnedEvent::Start { tag, attrs }
                 }
                 Ok(Event::End(ref e)) => OwnedEvent::End {
@@ -403,7 +404,7 @@ extern "C" fn prim_xml_next_event(args: *const ElleValue, nargs: usize) -> ElleR
         };
         match owned {
             OwnedEvent::Error(msg) => {
-                return a.err("xml-error", &msg);
+                return a.err(ctx, "xml-error", &msg);
             }
             OwnedEvent::Start { tag, attrs } => {
                 let attrs = match attrs {
@@ -412,39 +413,39 @@ extern "C" fn prim_xml_next_event(args: *const ElleValue, nargs: usize) -> ElleR
                 };
                 let attrs_kvs: Vec<(&str, ElleValue)> =
                     attrs.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-                let attrs_val = a.build_struct(&attrs_kvs);
-                return a.ok(a.build_struct(&[
+                let attrs_val = a.build_struct(ctx, &attrs_kvs);
+                return a.ok(a.build_struct(ctx, &[
                     ("type", a.keyword("start")),
-                    ("tag", a.string(&tag)),
+                    ("tag", a.string(ctx, &tag)),
                     ("attrs", attrs_val),
                 ]));
             }
             OwnedEvent::End { tag } => {
-                return a.ok(a.build_struct(&[
+                return a.ok(a.build_struct(ctx, &[
                     ("type", a.keyword("end")),
-                    ("tag", a.string(&tag)),
+                    ("tag", a.string(ctx, &tag)),
                 ]));
             }
             OwnedEvent::Text(text) => {
-                return a.ok(a.build_struct(&[
+                return a.ok(a.build_struct(ctx, &[
                     ("type", a.keyword("text")),
-                    ("content", a.string(&text)),
+                    ("content", a.string(ctx, &text)),
                 ]));
             }
             OwnedEvent::Eof => {
-                return a.ok(a.build_struct(&[("type", a.keyword("eof"))]));
+                return a.ok(a.build_struct(ctx, &[("type", a.keyword("eof"))]));
             }
             OwnedEvent::Skip => continue,
         }
     }
 }
 
-extern "C" fn prim_xml_reader_close(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xml_reader_close(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     match a.get_external::<XmlReaderState>(arg0, "xml-reader") {
         Some(_) => a.ok(a.nil()),
-        None => a.err(
+        None => a.err(ctx, 
             "type-error",
             &format!(
                 "xml/reader-close: expected xml-reader, got {}",
@@ -458,29 +459,29 @@ extern "C" fn prim_xml_reader_close(args: *const ElleValue, nargs: usize) -> Ell
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_xml_parse(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xml_parse(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let s = match a.get_string(arg0) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("xml/parse: expected string, got {}", a.type_name(arg0)),
             );
         }
     };
-    match parse_xml(&s) {
+    match parse_xml(ctx, &s) {
         Ok(val) => a.ok(val),
-        Err(e) => a.err("xml-error", &e),
+        Err(e) => a.err(ctx, "xml-error", &e),
     }
 }
 
-extern "C" fn prim_xml_emit(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_xml_emit(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     if !a.check_struct(arg0) {
-        return a.err(
+        return a.err(ctx, 
             "xml-error",
             &format!(
                 "xml/emit: expected element struct, got {}",
@@ -489,8 +490,8 @@ extern "C" fn prim_xml_emit(args: *const ElleValue, nargs: usize) -> ElleResult 
         );
     }
     match emit_xml(arg0) {
-        Ok(s) => a.ok(a.string(&s)),
-        Err(e) => a.err("xml-error", &e),
+        Ok(s) => a.ok(a.string(ctx, &s)),
+        Err(e) => a.err(ctx, "xml-error", &e),
     }
 }
 
