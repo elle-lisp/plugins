@@ -3,7 +3,7 @@
 //! Renders line charts, scatter plots, bar charts, histograms, and area charts
 //! to PNG bytes or SVG strings.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("plotters/", &PRIMITIVES);
 
@@ -190,12 +190,13 @@ fn parse_opts(a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
 }
 
 fn extract_points(
+    ctx: *mut ElleCtx,
     a: &elle_plugin::Api,
     data: ElleValue,
     name: &str,
 ) -> Result<Vec<(f64, f64)>, ElleResult> {
     let len = a.get_array_len(data).ok_or_else(|| {
-        a.err(
+        a.err(ctx, 
             "type-error",
             &format!("{}: data must be array of [x y] pairs, got {}", name, a.type_name(data)),
         )
@@ -204,53 +205,55 @@ fn extract_points(
     for i in 0..len {
         let p = a.get_array_item(data, i);
         let plen = a.get_array_len(p).ok_or_else(|| {
-            a.err("type-error", &format!("{}: data[{}] must be [x y], got {}", name, i, a.type_name(p)))
+            a.err(ctx, "type-error", &format!("{}: data[{}] must be [x y], got {}", name, i, a.type_name(p)))
         })?;
         if plen < 2 {
-            return Err(a.err(
+            return Err(a.err(ctx, 
                 "value-error",
                 &format!("{}: data[{}] needs at least 2 elements", name, i),
             ));
         }
         let x = num(a, a.get_array_item(p, 0))
-            .ok_or_else(|| a.err("type-error", &format!("{}: data[{}][0] not a number", name, i)))?;
+            .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: data[{}][0] not a number", name, i)))?;
         let y = num(a, a.get_array_item(p, 1))
-            .ok_or_else(|| a.err("type-error", &format!("{}: data[{}][1] not a number", name, i)))?;
+            .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: data[{}][1] not a number", name, i)))?;
         pts.push((x, y));
     }
     Ok(pts)
 }
 
 fn extract_values(
+    ctx: *mut ElleCtx,
     a: &elle_plugin::Api,
     data: ElleValue,
     name: &str,
 ) -> Result<Vec<f64>, ElleResult> {
     let len = a.get_array_len(data).ok_or_else(|| {
-        a.err("type-error", &format!("{}: must be array of numbers, got {}", name, a.type_name(data)))
+        a.err(ctx, "type-error", &format!("{}: must be array of numbers, got {}", name, a.type_name(data)))
     })?;
     (0..len)
         .map(|i| {
             num(a, a.get_array_item(data, i))
-                .ok_or_else(|| a.err("type-error", &format!("{}: [{}] not a number", name, i)))
+                .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: [{}] not a number", name, i)))
         })
         .collect()
 }
 
 fn extract_labels(
+    ctx: *mut ElleCtx,
     a: &elle_plugin::Api,
     data: ElleValue,
     name: &str,
 ) -> Result<Vec<String>, ElleResult> {
     let len = a.get_array_len(data).ok_or_else(|| {
-        a.err("type-error", &format!("{}: labels must be array of strings, got {}", name, a.type_name(data)))
+        a.err(ctx, "type-error", &format!("{}: labels must be array of strings, got {}", name, a.type_name(data)))
     })?;
     (0..len)
         .map(|i| {
             let v = a.get_array_item(data, i);
             a.get_string(v)
                 .map(|s| s.to_string())
-                .ok_or_else(|| a.err("type-error", &format!("{}: labels[{}] not a string", name, i)))
+                .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: labels[{}] not a string", name, i)))
         })
         .collect()
 }
@@ -564,7 +567,7 @@ fn draw_hist<DB: DrawingBackend>(
 
 // ── Backend dispatch ─────────────────────────────────────────────────
 
-fn render_xy_chart(series: &[SeriesSpec], opts: &ChartOpts) -> Result<ElleValue, String> {
+fn render_xy_chart(ctx: *mut ElleCtx, series: &[SeriesSpec], opts: &ChartOpts) -> Result<ElleValue, String> {
     let a = api();
     if opts.svg {
         let mut buf = String::new();
@@ -573,7 +576,7 @@ fn render_xy_chart(series: &[SeriesSpec], opts: &ChartOpts) -> Result<ElleValue,
                 .into_drawing_area();
             draw_xy(root, series, opts)?;
         }
-        Ok(a.string(&buf))
+        Ok(a.string(ctx, &buf))
     } else {
         let mut px = vec![0u8; (opts.width as usize) * (opts.height as usize) * 3];
         {
@@ -581,11 +584,12 @@ fn render_xy_chart(series: &[SeriesSpec], opts: &ChartOpts) -> Result<ElleValue,
                 BitMapBackend::with_buffer(&mut px, (opts.width, opts.height)).into_drawing_area();
             draw_xy(root, series, opts)?;
         }
-        Ok(a.bytes(&rgb_to_png(&px, opts.width, opts.height)?))
+        Ok(a.bytes(ctx, &rgb_to_png(&px, opts.width, opts.height)?))
     }
 }
 
 fn render_bar_chart(
+    ctx: *mut ElleCtx,
     labels: &[String],
     values: &[f64],
     opts: &ChartOpts,
@@ -598,7 +602,7 @@ fn render_bar_chart(
                 .into_drawing_area();
             draw_bars(root, labels, values, opts)?;
         }
-        Ok(a.string(&buf))
+        Ok(a.string(ctx, &buf))
     } else {
         let mut px = vec![0u8; (opts.width as usize) * (opts.height as usize) * 3];
         {
@@ -606,11 +610,11 @@ fn render_bar_chart(
                 BitMapBackend::with_buffer(&mut px, (opts.width, opts.height)).into_drawing_area();
             draw_bars(root, labels, values, opts)?;
         }
-        Ok(a.bytes(&rgb_to_png(&px, opts.width, opts.height)?))
+        Ok(a.bytes(ctx, &rgb_to_png(&px, opts.width, opts.height)?))
     }
 }
 
-fn render_histogram(values: &[f64], opts: &ChartOpts) -> Result<ElleValue, String> {
+fn render_histogram(ctx: *mut ElleCtx, values: &[f64], opts: &ChartOpts) -> Result<ElleValue, String> {
     let a = api();
     if opts.svg {
         let mut buf = String::new();
@@ -619,7 +623,7 @@ fn render_histogram(values: &[f64], opts: &ChartOpts) -> Result<ElleValue, Strin
                 .into_drawing_area();
             draw_hist(root, values, opts)?;
         }
-        Ok(a.string(&buf))
+        Ok(a.string(ctx, &buf))
     } else {
         let mut px = vec![0u8; (opts.width as usize) * (opts.height as usize) * 3];
         {
@@ -627,30 +631,30 @@ fn render_histogram(values: &[f64], opts: &ChartOpts) -> Result<ElleValue, Strin
                 BitMapBackend::with_buffer(&mut px, (opts.width, opts.height)).into_drawing_area();
             draw_hist(root, values, opts)?;
         }
-        Ok(a.bytes(&rgb_to_png(&px, opts.width, opts.height)?))
+        Ok(a.bytes(ctx, &rgb_to_png(&px, opts.width, opts.height)?))
     }
 }
 
 // ── Primitives ───────────────────────────────────────────────────────
 
-extern "C" fn prim_line(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_line(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let pts = match extract_points(a, unsafe { a.arg(args, nargs, 0) }, "plotters/line") {
+    let pts = match extract_points(ctx, a, unsafe { a.arg(args, nargs, 0) }, "plotters/line") {
         Ok(p) => p,
         Err(e) => return e,
     };
     let opts =
         if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series = vec![SeriesSpec { kind: SeriesKind::Line, label: None, data: pts, color: None, size: None }];
-    match render_xy_chart(&series, &opts) {
+    match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
-        Err(e) => a.err("plotters-error", &format!("plotters/line: {}", e)),
+        Err(e) => a.err(ctx, "plotters-error", &format!("plotters/line: {}", e)),
     }
 }
 
-extern "C" fn prim_scatter(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_scatter(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let pts = match extract_points(a, unsafe { a.arg(args, nargs, 0) }, "plotters/scatter") {
+    let pts = match extract_points(ctx, a, unsafe { a.arg(args, nargs, 0) }, "plotters/scatter") {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -658,39 +662,39 @@ extern "C" fn prim_scatter(args: *const ElleValue, nargs: usize) -> ElleResult {
         if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series =
         vec![SeriesSpec { kind: SeriesKind::Scatter, label: None, data: pts, color: None, size: None }];
-    match render_xy_chart(&series, &opts) {
+    match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
-        Err(e) => a.err("plotters-error", &format!("plotters/scatter: {}", e)),
+        Err(e) => a.err(ctx, "plotters-error", &format!("plotters/scatter: {}", e)),
     }
 }
 
-extern "C" fn prim_area(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_area(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let pts = match extract_points(a, unsafe { a.arg(args, nargs, 0) }, "plotters/area") {
+    let pts = match extract_points(ctx, a, unsafe { a.arg(args, nargs, 0) }, "plotters/area") {
         Ok(p) => p,
         Err(e) => return e,
     };
     let opts =
         if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series = vec![SeriesSpec { kind: SeriesKind::Area, label: None, data: pts, color: None, size: None }];
-    match render_xy_chart(&series, &opts) {
+    match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
-        Err(e) => a.err("plotters-error", &format!("plotters/area: {}", e)),
+        Err(e) => a.err(ctx, "plotters-error", &format!("plotters/area: {}", e)),
     }
 }
 
-extern "C" fn prim_bar(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_bar(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let labels = match extract_labels(a, unsafe { a.arg(args, nargs, 0) }, "plotters/bar") {
+    let labels = match extract_labels(ctx, a, unsafe { a.arg(args, nargs, 0) }, "plotters/bar") {
         Ok(l) => l,
         Err(e) => return e,
     };
-    let values = match extract_values(a, unsafe { a.arg(args, nargs, 1) }, "plotters/bar") {
+    let values = match extract_values(ctx, a, unsafe { a.arg(args, nargs, 1) }, "plotters/bar") {
         Ok(v) => v,
         Err(e) => return e,
     };
     if labels.len() != values.len() {
-        return a.err(
+        return a.err(ctx, 
             "value-error",
             &format!(
                 "plotters/bar: labels ({}) and values ({}) length mismatch",
@@ -701,15 +705,15 @@ extern "C" fn prim_bar(args: *const ElleValue, nargs: usize) -> ElleResult {
     }
     let opts =
         if nargs > 2 { parse_opts(a, unsafe { a.arg(args, nargs, 2) }) } else { ChartOpts::default() };
-    match render_bar_chart(&labels, &values, &opts) {
+    match render_bar_chart(ctx, &labels, &values, &opts) {
         Ok(v) => a.ok(v),
-        Err(e) => a.err("plotters-error", &format!("plotters/bar: {}", e)),
+        Err(e) => a.err(ctx, "plotters-error", &format!("plotters/bar: {}", e)),
     }
 }
 
-extern "C" fn prim_histogram(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_histogram(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let vals = match extract_values(a, unsafe { a.arg(args, nargs, 0) }, "plotters/histogram") {
+    let vals = match extract_values(ctx, a, unsafe { a.arg(args, nargs, 0) }, "plotters/histogram") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -718,17 +722,17 @@ extern "C" fn prim_histogram(args: *const ElleValue, nargs: usize) -> ElleResult
     } else {
         ChartOpts::default()
     };
-    match render_histogram(&vals, &opts) {
+    match render_histogram(ctx, &vals, &opts) {
         Ok(v) => a.ok(v),
-        Err(e) => a.err("plotters-error", &format!("plotters/histogram: {}", e)),
+        Err(e) => a.err(ctx, "plotters-error", &format!("plotters/histogram: {}", e)),
     }
 }
 
-extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let spec = unsafe { a.arg(args, nargs, 0) };
     if !a.check_struct(spec) {
-        return a.err(
+        return a.err(ctx, 
             "type-error",
             &format!("plotters/chart: expected struct, got {}", a.type_name(spec)),
         );
@@ -737,13 +741,13 @@ extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
     let sv = a.get_struct_field(spec, "series");
     let slen = match a.get_array_len(sv) {
         Some(n) => n,
-        None => return a.err("type-error", "plotters/chart: :series must be an array"),
+        None => return a.err(ctx, "type-error", "plotters/chart: :series must be an array"),
     };
     let mut series = Vec::with_capacity(slen);
     for i in 0..slen {
         let s = a.get_array_item(sv, i);
         if !a.check_struct(s) {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("plotters/chart: series[{}] must be a struct", i),
             );
@@ -754,7 +758,7 @@ extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
             Some("area") => SeriesKind::Area,
             Some("bar") => SeriesKind::Bar,
             _ => {
-                return a.err(
+                return a.err(ctx, 
                     "value-error",
                     &format!(
                         "plotters/chart: series[{}] :type must be :line, :scatter, :area, or :bar",
@@ -765,6 +769,7 @@ extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
         };
         let label = a.get_string(a.get_struct_field(s, "label")).map(|s| s.to_string());
         let data = match extract_points(
+            ctx,
             a,
             a.get_struct_field(s, "data"),
             &format!("plotters/chart series[{}]", i),
@@ -776,9 +781,9 @@ extern "C" fn prim_chart(args: *const ElleValue, nargs: usize) -> ElleResult {
         let size = a.get_int(a.get_struct_field(s, "size")).map(|v| v.max(1) as u32);
         series.push(SeriesSpec { kind, label, data, color, size });
     }
-    match render_xy_chart(&series, &opts) {
+    match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
-        Err(e) => a.err("plotters-error", &format!("plotters/chart: {}", e)),
+        Err(e) => a.err(ctx, "plotters-error", &format!("plotters/chart: {}", e)),
     }
 }
 
