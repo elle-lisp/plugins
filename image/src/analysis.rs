@@ -4,12 +4,12 @@ use image::DynamicImage;
 use imageproc::contrast;
 use imageproc::edges;
 use imageproc::morphology;
-use elle_plugin::{ElleResult, ElleValue};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue};
 use crate::{api, get_image, require_int, wrap_image};
 
-pub(crate) extern "C" fn prim_histogram(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub(crate) extern "C" fn prim_histogram(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let img = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/histogram") { Ok(i) => i, Err(e) => return e };
+    let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/histogram") { Ok(i) => i, Err(e) => return e };
     let rgba = img.to_rgba8();
     let mut r_hist = vec![0i64; 256];
     let mut g_hist = vec![0i64; 256];
@@ -21,16 +21,16 @@ pub(crate) extern "C" fn prim_histogram(args: *const ElleValue, nargs: usize) ->
         b_hist[px[2] as usize] += 1;
         a_hist[px[3] as usize] += 1;
     }
-    let to_array = |h: Vec<i64>| { let vals: Vec<ElleValue> = h.into_iter().map(|v| a.int(v)).collect(); a.array(&vals) };
-    a.ok(a.build_struct(&[
+    let to_array = |h: Vec<i64>| { let vals: Vec<ElleValue> = h.into_iter().map(|v| a.int(v)).collect(); a.array(ctx, &vals) };
+    a.ok(a.build_struct(ctx, &[
         ("r", to_array(r_hist)), ("g", to_array(g_hist)),
         ("b", to_array(b_hist)), ("a", to_array(a_hist)),
     ]))
 }
 
-pub(crate) extern "C" fn prim_edges(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub(crate) extern "C" fn prim_edges(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let img = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/edges") { Ok(i) => i, Err(e) => return e };
+    let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/edges") { Ok(i) => i, Err(e) => return e };
     let algo = if nargs > 1 {
         a.get_keyword_name(unsafe { a.arg(args, nargs, 1) }).unwrap_or("canny")
     } else { "canny" };
@@ -49,34 +49,34 @@ pub(crate) extern "C" fn prim_edges(args: *const ElleValue, nargs: usize) -> Ell
             }
             out
         }
-        _ => return a.err("value-error", &format!("image/edges: unknown algorithm :{}, expected :canny or :sobel", algo)),
+        _ => return a.err(ctx, "value-error", &format!("image/edges: unknown algorithm :{}, expected :canny or :sobel", algo)),
     };
-    a.ok(wrap_image(DynamicImage::ImageLuma8(result)))
+    a.ok(wrap_image(ctx, DynamicImage::ImageLuma8(result)))
 }
 
-pub(crate) extern "C" fn prim_threshold(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub(crate) extern "C" fn prim_threshold(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let img = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/threshold") { Ok(i) => i, Err(e) => return e };
-    let t = match require_int(unsafe { a.arg(args, nargs, 1) }, "image/threshold", "threshold") { Ok(v) => v.clamp(0, 255) as u8, Err(e) => return e };
+    let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/threshold") { Ok(i) => i, Err(e) => return e };
+    let t = match require_int(ctx, unsafe { a.arg(args, nargs, 1) }, "image/threshold", "threshold") { Ok(v) => v.clamp(0, 255) as u8, Err(e) => return e };
     let gray = img.to_luma8();
     let result = contrast::threshold(&gray, t, imageproc::contrast::ThresholdType::Binary);
-    a.ok(wrap_image(DynamicImage::ImageLuma8(result)))
+    a.ok(wrap_image(ctx, DynamicImage::ImageLuma8(result)))
 }
 
-pub(crate) extern "C" fn prim_erode(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub(crate) extern "C" fn prim_erode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let img = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/erode") { Ok(i) => i, Err(e) => return e };
-    let radius = match require_int(unsafe { a.arg(args, nargs, 1) }, "image/erode", "radius") { Ok(v) => v.max(0) as u8, Err(e) => return e };
+    let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/erode") { Ok(i) => i, Err(e) => return e };
+    let radius = match require_int(ctx, unsafe { a.arg(args, nargs, 1) }, "image/erode", "radius") { Ok(v) => v.max(0) as u8, Err(e) => return e };
     let gray = img.to_luma8();
     let result = morphology::erode(&gray, imageproc::distance_transform::Norm::LInf, radius);
-    a.ok(wrap_image(DynamicImage::ImageLuma8(result)))
+    a.ok(wrap_image(ctx, DynamicImage::ImageLuma8(result)))
 }
 
-pub(crate) extern "C" fn prim_dilate(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub(crate) extern "C" fn prim_dilate(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let img = match get_image(unsafe { a.arg(args, nargs, 0) }, "image/dilate") { Ok(i) => i, Err(e) => return e };
-    let radius = match require_int(unsafe { a.arg(args, nargs, 1) }, "image/dilate", "radius") { Ok(v) => v.max(0) as u8, Err(e) => return e };
+    let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/dilate") { Ok(i) => i, Err(e) => return e };
+    let radius = match require_int(ctx, unsafe { a.arg(args, nargs, 1) }, "image/dilate", "radius") { Ok(v) => v.max(0) as u8, Err(e) => return e };
     let gray = img.to_luma8();
     let result = morphology::dilate(&gray, imageproc::distance_transform::Norm::LInf, radius);
-    a.ok(wrap_image(DynamicImage::ImageLuma8(result)))
+    a.ok(wrap_image(ctx, DynamicImage::ImageLuma8(result)))
 }

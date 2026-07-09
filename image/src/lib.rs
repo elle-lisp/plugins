@@ -12,7 +12,7 @@ use std::cell::RefCell;
 
 use image::DynamicImage;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 
 elle_plugin::define_plugin!("image/", &PRIMITIVES);
 
@@ -23,25 +23,30 @@ pub struct ImageMut(pub RefCell<DynamicImage>);
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-pub fn get_image(val: ElleValue, name: &str) -> Result<DynamicImage, ElleResult> {
+// Every helper below that can build an error value or wrap an external object
+// now threads the per-call `ctx`, so the value it allocates lands in the
+// calling primitive's region (ABI v3). Pure helpers (`color_type_keyword`,
+// `parse_color_type`) allocate nothing and keep their old signatures.
+
+pub fn get_image(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<DynamicImage, ElleResult> {
     let a = api();
     if let Some(w) = a.get_external::<ImageWrap>(val, "image") {
         Ok(w.0.clone())
     } else if let Some(m) = a.get_external::<ImageMut>(val, "@image") {
         Ok(m.0.borrow().clone())
     } else {
-        Err(a.err("type-error", &format!("{}: expected image or @image, got {}", name, a.type_name(val))))
+        Err(a.err(ctx, "type-error", &format!("{}: expected image or @image, got {}", name, a.type_name(val))))
     }
 }
 
-pub fn get_image_ref<'a>(val: ElleValue, name: &str) -> Result<ImageRef<'a>, ElleResult> {
+pub fn get_image_ref<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<ImageRef<'a>, ElleResult> {
     let a = api();
     if let Some(w) = a.get_external::<ImageWrap>(val, "image") {
         Ok(ImageRef::Immutable(&w.0))
     } else if let Some(m) = a.get_external::<ImageMut>(val, "@image") {
         Ok(ImageRef::Mutable(m))
     } else {
-        Err(a.err("type-error", &format!("{}: expected image or @image, got {}", name, a.type_name(val))))
+        Err(a.err(ctx, "type-error", &format!("{}: expected image or @image, got {}", name, a.type_name(val))))
     }
 }
 
@@ -56,61 +61,61 @@ impl ImageRef<'_> {
     }
 }
 
-pub fn get_image_mut<'a>(val: ElleValue, name: &str) -> Result<&'a ImageMut, ElleResult> {
+pub fn get_image_mut<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a ImageMut, ElleResult> {
     let a = api();
     a.get_external::<ImageMut>(val, "@image").ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected @image, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected @image, got {}", name, a.type_name(val)))
     })
 }
 
-pub fn wrap_image(img: DynamicImage) -> ElleValue {
-    api().external("image", ImageWrap(img))
+pub fn wrap_image(ctx: *mut ElleCtx, img: DynamicImage) -> ElleValue {
+    api().external(ctx, "image", ImageWrap(img))
 }
 
-pub fn wrap_image_mut(img: DynamicImage) -> ElleValue {
-    api().external("@image", ImageMut(RefCell::new(img)))
+pub fn wrap_image_mut(ctx: *mut ElleCtx, img: DynamicImage) -> ElleValue {
+    api().external(ctx, "@image", ImageMut(RefCell::new(img)))
 }
 
-pub fn require_int(val: ElleValue, name: &str, param: &str) -> Result<i64, ElleResult> {
+pub fn require_int(ctx: *mut ElleCtx, val: ElleValue, name: &str, param: &str) -> Result<i64, ElleResult> {
     let a = api();
-    a.get_int(val).ok_or_else(|| a.err("type-error", &format!("{}: {} must be int, got {}", name, param, a.type_name(val))))
+    a.get_int(val).ok_or_else(|| a.err(ctx, "type-error", &format!("{}: {} must be int, got {}", name, param, a.type_name(val))))
 }
 
-pub fn require_float(val: ElleValue, name: &str, param: &str) -> Result<f64, ElleResult> {
+pub fn require_float(ctx: *mut ElleCtx, val: ElleValue, name: &str, param: &str) -> Result<f64, ElleResult> {
     let a = api();
     a.get_float(val).or_else(|| a.get_int(val).map(|i| i as f64))
-        .ok_or_else(|| a.err("type-error", &format!("{}: {} must be number, got {}", name, param, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: {} must be number, got {}", name, param, a.type_name(val))))
 }
 
-pub fn require_string(val: ElleValue, name: &str, param: &str) -> Result<String, ElleResult> {
+pub fn require_string(ctx: *mut ElleCtx, val: ElleValue, name: &str, param: &str) -> Result<String, ElleResult> {
     let a = api();
     a.get_string(val).map(|s| s.to_string())
-        .ok_or_else(|| a.err("type-error", &format!("{}: {} must be string, got {}", name, param, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: {} must be string, got {}", name, param, a.type_name(val))))
 }
 
-pub fn extract_color(val: ElleValue, name: &str) -> Result<image::Rgba<u8>, ElleResult> {
+pub fn extract_color(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<image::Rgba<u8>, ElleResult> {
     let a = api();
     let len = a.get_array_len(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: color must be [r g b a] array, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: color must be [r g b a] array, got {}", name, a.type_name(val)))
     })?;
     if len != 4 {
-        return Err(a.err("value-error", &format!("{}: color array must have 4 elements, got {}", name, len)));
+        return Err(a.err(ctx, "value-error", &format!("{}: color array must have 4 elements, got {}", name, len)));
     }
     let mut rgba = [0u8; 4];
     for (i, slot) in rgba.iter_mut().enumerate() {
         let v = a.get_array_item(val, i);
         let n = a.get_int(v).ok_or_else(|| {
-            a.err("type-error", &format!("{}: color component must be int, got {}", name, a.type_name(v)))
+            a.err(ctx, "type-error", &format!("{}: color component must be int, got {}", name, a.type_name(v)))
         })?;
         *slot = n.clamp(0, 255) as u8;
     }
     Ok(image::Rgba(rgba))
 }
 
-pub fn parse_format(val: ElleValue, name: &str) -> Result<image::ImageFormat, ElleResult> {
+pub fn parse_format(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<image::ImageFormat, ElleResult> {
     let a = api();
     let kw = a.get_keyword_name(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: format must be a keyword, got {}", name, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: format must be a keyword, got {}", name, a.type_name(val)))
     })?;
     match kw {
         "png" => Ok(image::ImageFormat::Png),
@@ -121,7 +126,7 @@ pub fn parse_format(val: ElleValue, name: &str) -> Result<image::ImageFormat, El
         "bmp" => Ok(image::ImageFormat::Bmp),
         "ico" => Ok(image::ImageFormat::Ico),
         "qoi" => Ok(image::ImageFormat::Qoi),
-        _ => Err(a.err("value-error", &format!("{}: unsupported format :{}", name, kw))),
+        _ => Err(a.err(ctx, "value-error", &format!("{}: unsupported format :{}", name, kw))),
     }
 }
 
