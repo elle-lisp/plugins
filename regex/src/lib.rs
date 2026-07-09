@@ -1,6 +1,6 @@
 //! Elle regex plugin — regular expression support via the `regex` crate.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 use regex::Regex;
 elle_plugin::define_plugin!("regex/", &PRIMITIVES);
 
@@ -8,10 +8,10 @@ elle_plugin::define_plugin!("regex/", &PRIMITIVES);
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn require_arity(name: &str, nargs: usize, expected: usize) -> Result<(), ElleResult> {
+fn require_arity(ctx: *mut ElleCtx, name: &str, nargs: usize, expected: usize) -> Result<(), ElleResult> {
     if nargs != expected {
         let a = api();
-        Err(a.err(
+        Err(a.err(ctx, 
             "arity-error",
             &format!(
                 "{}: expected {} argument{}, got {}",
@@ -26,38 +26,38 @@ fn require_arity(name: &str, nargs: usize, expected: usize) -> Result<(), ElleRe
     }
 }
 
-fn require_regex<'a>(name: &str, v: ElleValue) -> Result<&'a Regex, ElleResult> {
+fn require_regex<'a>(ctx: *mut ElleCtx, name: &str, v: ElleValue) -> Result<&'a Regex, ElleResult> {
     let a = api();
     a.get_external::<Regex>(v, "regex").ok_or_else(|| {
-        a.err(
+        a.err(ctx, 
             "type-error",
             &format!("{}: expected regex, got {}", name, a.type_name(v)),
         )
     })
 }
 
-fn require_string(name: &str, v: ElleValue) -> Result<String, ElleResult> {
+fn require_string(ctx: *mut ElleCtx, name: &str, v: ElleValue) -> Result<String, ElleResult> {
     let a = api();
     a.get_string(v)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            a.err(
+            a.err(ctx, 
                 "type-error",
                 &format!("{}: expected string, got {}", name, a.type_name(v)),
             )
         })
 }
 
-fn match_struct(m: regex::Match<'_>) -> ElleValue {
+fn match_struct(ctx: *mut ElleCtx, m: regex::Match<'_>) -> ElleValue {
     let a = api();
-    a.build_struct(&[
-        ("match", a.string(m.as_str())),
+    a.build_struct(ctx, &[
+        ("match", a.string(ctx, m.as_str())),
         ("start", a.int(m.start() as i64)),
         ("end", a.int(m.end() as i64)),
     ])
 }
 
-fn captures_struct(re: &Regex, caps: &regex::Captures<'_>) -> ElleValue {
+fn captures_struct(ctx: *mut ElleCtx, re: &Regex, caps: &regex::Captures<'_>) -> ElleValue {
     let a = api();
     let mut fields: Vec<(&str, ElleValue)> = Vec::new();
     // Numbered captures — we need owned strings for the keys, but build_struct
@@ -68,7 +68,7 @@ fn captures_struct(re: &Regex, caps: &regex::Captures<'_>) -> ElleValue {
     for (i, m) in caps.iter().enumerate() {
         if let Some(m) = m {
             numbered_keys.push(format!("{}", i));
-            numbered_vals.push(a.string(m.as_str()));
+            numbered_vals.push(a.string(ctx, m.as_str()));
         }
     }
     // Named captures
@@ -77,7 +77,7 @@ fn captures_struct(re: &Regex, caps: &regex::Captures<'_>) -> ElleValue {
     for name in re.capture_names().flatten() {
         if let Some(m) = caps.name(name) {
             named_keys.push(name.to_string());
-            named_vals.push(a.string(m.as_str()));
+            named_vals.push(a.string(ctx, m.as_str()));
         }
     }
     // Build field tuples referencing the owned strings
@@ -87,176 +87,176 @@ fn captures_struct(re: &Regex, caps: &regex::Captures<'_>) -> ElleValue {
     for (k, v) in named_keys.iter().zip(named_vals.iter()) {
         fields.push((k.as_str(), *v));
     }
-    a.build_struct(&fields)
+    a.build_struct(ctx, &fields)
 }
 
 // ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_regex_compile(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_compile(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/compile", nargs, 1) {
+    if let Err(e) = require_arity(ctx, "regex/compile", nargs, 1) {
         return e;
     }
-    let pattern = match require_string("regex/compile", unsafe { a.arg(args, nargs, 0) }) {
+    let pattern = match require_string(ctx, "regex/compile", unsafe { a.arg(args, nargs, 0) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     match Regex::new(&pattern) {
-        Ok(re) => a.ok(a.external("regex", re)),
-        Err(e) => a.err("regex-error", &format!("regex/compile: {}", e)),
+        Ok(re) => a.ok(a.external(ctx, "regex", re)),
+        Err(e) => a.err(ctx, "regex-error", &format!("regex/compile: {}", e)),
     }
 }
 
-extern "C" fn prim_regex_match(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_match(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/match?", nargs, 2) {
+    if let Err(e) = require_arity(ctx, "regex/match?", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/match?", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/match?", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/match?", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/match?", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     a.ok(a.boolean(re.is_match(&text)))
 }
 
-extern "C" fn prim_regex_find(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_find(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/find", nargs, 2) {
+    if let Err(e) = require_arity(ctx, "regex/find", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/find", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/find", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/find", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/find", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     match re.find(&text) {
-        Some(m) => a.ok(match_struct(m)),
+        Some(m) => a.ok(match_struct(ctx, m)),
         None => a.ok(a.nil()),
     }
 }
 
-extern "C" fn prim_regex_find_all(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_find_all(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/find-all", nargs, 2) {
+    if let Err(e) = require_arity(ctx, "regex/find-all", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/find-all", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/find-all", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/find-all", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/find-all", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let matches: Vec<ElleValue> = re.find_iter(&text).map(match_struct).collect();
-    a.ok(a.array(&matches))
+    let matches: Vec<ElleValue> = re.find_iter(&text).map(|m| match_struct(ctx, m)).collect();
+    a.ok(a.array(ctx, &matches))
 }
 
-extern "C" fn prim_regex_captures(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_captures(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/captures", nargs, 2) {
+    if let Err(e) = require_arity(ctx, "regex/captures", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/captures", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/captures", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/captures", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/captures", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     match re.captures(&text) {
-        Some(caps) => a.ok(captures_struct(re, &caps)),
+        Some(caps) => a.ok(captures_struct(ctx, re, &caps)),
         None => a.ok(a.nil()),
     }
 }
 
-extern "C" fn prim_regex_captures_all(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_captures_all(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/captures-all", nargs, 2) {
+    if let Err(e) = require_arity(ctx, "regex/captures-all", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/captures-all", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/captures-all", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/captures-all", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/captures-all", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let results: Vec<ElleValue> = re
         .captures_iter(&text)
-        .map(|caps| captures_struct(re, &caps))
+        .map(|caps| captures_struct(ctx, re, &caps))
         .collect();
-    a.ok(a.array(&results))
+    a.ok(a.array(ctx, &results))
 }
 
-extern "C" fn prim_regex_replace(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_replace(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/replace", nargs, 3) {
+    if let Err(e) = require_arity(ctx, "regex/replace", nargs, 3) {
         return e;
     }
-    let re = match require_regex("regex/replace", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/replace", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/replace", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/replace", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let replacement = match require_string("regex/replace", unsafe { a.arg(args, nargs, 2) }) {
+    let replacement = match require_string(ctx, "regex/replace", unsafe { a.arg(args, nargs, 2) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let result = re.replace(&text, replacement.as_str());
-    a.ok(a.string(&result))
+    a.ok(a.string(ctx, &result))
 }
 
-extern "C" fn prim_regex_replace_all(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_replace_all(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/replace-all", nargs, 3) {
+    if let Err(e) = require_arity(ctx, "regex/replace-all", nargs, 3) {
         return e;
     }
-    let re = match require_regex("regex/replace-all", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/replace-all", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/replace-all", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/replace-all", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let replacement = match require_string("regex/replace-all", unsafe { a.arg(args, nargs, 2) }) {
+    let replacement = match require_string(ctx, "regex/replace-all", unsafe { a.arg(args, nargs, 2) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let result = re.replace_all(&text, replacement.as_str());
-    a.ok(a.string(&result))
+    a.ok(a.string(ctx, &result))
 }
 
-extern "C" fn prim_regex_split(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_regex_split(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if let Err(e) = require_arity("regex/split", nargs, 2) {
+    if let Err(e) = require_arity(ctx, "regex/split", nargs, 2) {
         return e;
     }
-    let re = match require_regex("regex/split", unsafe { a.arg(args, nargs, 0) }) {
+    let re = match require_regex(ctx, "regex/split", unsafe { a.arg(args, nargs, 0) }) {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let text = match require_string("regex/split", unsafe { a.arg(args, nargs, 1) }) {
+    let text = match require_string(ctx, "regex/split", unsafe { a.arg(args, nargs, 1) }) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let parts: Vec<ElleValue> = re.split(&text).map(|s| a.string(s)).collect();
-    a.ok(a.array(&parts))
+    let parts: Vec<ElleValue> = re.split(&text).map(|s| a.string(ctx, s)).collect();
+    a.ok(a.array(ctx, &parts))
 }
 
 // ---------------------------------------------------------------------------
