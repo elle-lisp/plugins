@@ -3,7 +3,7 @@
 //! Renders SVG strings (or struct trees emitted to XML) to PNG or raw pixels.
 //! Construction and emission live in lib/svg.lisp (pure Elle).
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("svg/", &PRIMITIVES);
 
@@ -56,7 +56,7 @@ fn xml_escape(s: &str, out: &mut String) {
 }
 
 /// Get SVG XML string from either a struct tree or a raw string.
-fn get_svg_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
+fn get_svg_string(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<String, ElleResult> {
     let a = api();
     if let Some(s) = a.get_string(val) {
         Ok(s.to_string())
@@ -66,7 +66,7 @@ fn get_svg_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
         emit_element(a, val, &mut out);
         Ok(out)
     } else {
-        Err(a.err(
+        Err(a.err(ctx, 
             "type-error",
             &format!(
                 "{}: expected SVG string or struct tree, got {}",
@@ -77,11 +77,11 @@ fn get_svg_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
     }
 }
 
-fn require_string(val: ElleValue, name: &str, param: &str) -> Result<String, ElleResult> {
+fn require_string(ctx: *mut ElleCtx, val: ElleValue, name: &str, param: &str) -> Result<String, ElleResult> {
     let a = api();
     match a.get_string(val) {
         Some(s) => Ok(s.to_string()),
-        None => Err(a.err(
+        None => Err(a.err(ctx, 
             "type-error",
             &format!(
                 "{}: {} must be string, got {}",
@@ -146,25 +146,25 @@ fn render_svg_to_pixmap(
 
 // -- Primitives -------------------------------------------------------------
 
-extern "C" fn prim_render(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_render(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/render") {
+    let svg_str = match get_svg_string(ctx, unsafe { a.arg(args, nargs, 0) }, "svg/render") {
         Ok(s) => s,
         Err(e) => return e,
     };
     let opts = parse_render_opts(a, args, nargs, 1);
     match render_svg_to_pixmap(&svg_str, &opts) {
         Ok(pixmap) => match pixmap.encode_png() {
-            Ok(png_data) => a.ok(a.bytes(&png_data)),
-            Err(e) => a.err("svg-error", &format!("svg/render: PNG encode: {}", e)),
+            Ok(png_data) => a.ok(a.bytes(ctx, &png_data)),
+            Err(e) => a.err(ctx, "svg-error", &format!("svg/render: PNG encode: {}", e)),
         },
-        Err(e) => a.err("svg-error", &format!("svg/render: {}", e)),
+        Err(e) => a.err(ctx, "svg-error", &format!("svg/render: {}", e)),
     }
 }
 
-extern "C" fn prim_render_raw(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_render_raw(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/render-raw") {
+    let svg_str = match get_svg_string(ctx, unsafe { a.arg(args, nargs, 0) }, "svg/render-raw") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -174,23 +174,23 @@ extern "C" fn prim_render_raw(args: *const ElleValue, nargs: usize) -> ElleResul
             let w = pixmap.width();
             let h = pixmap.height();
             let data = pixmap.take();
-            a.ok(a.build_struct(&[
+            a.ok(a.build_struct(ctx, &[
                 ("width", a.int(w as i64)),
                 ("height", a.int(h as i64)),
-                ("data", a.bytes(&data)),
+                ("data", a.bytes(ctx, &data)),
             ]))
         }
-        Err(e) => a.err("svg-error", &format!("svg/render-raw: {}", e)),
+        Err(e) => a.err(ctx, "svg-error", &format!("svg/render-raw: {}", e)),
     }
 }
 
-extern "C" fn prim_render_to_file(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_render_to_file(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/render-to-file") {
+    let svg_str = match get_svg_string(ctx, unsafe { a.arg(args, nargs, 0) }, "svg/render-to-file") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let path = match require_string(unsafe { a.arg(args, nargs, 1) }, "svg/render-to-file", "path") {
+    let path = match require_string(ctx, unsafe { a.arg(args, nargs, 1) }, "svg/render-to-file", "path") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -198,15 +198,15 @@ extern "C" fn prim_render_to_file(args: *const ElleValue, nargs: usize) -> ElleR
     match render_svg_to_pixmap(&svg_str, &opts) {
         Ok(pixmap) => match pixmap.save_png(&path) {
             Ok(()) => a.ok(a.nil()),
-            Err(e) => a.err("svg-error", &format!("svg/render-to-file: {}", e)),
+            Err(e) => a.err(ctx, "svg-error", &format!("svg/render-to-file: {}", e)),
         },
-        Err(e) => a.err("svg-error", &format!("svg/render-to-file: {}", e)),
+        Err(e) => a.err(ctx, "svg-error", &format!("svg/render-to-file: {}", e)),
     }
 }
 
-extern "C" fn prim_dimensions(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_dimensions(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let svg_str = match get_svg_string(unsafe { a.arg(args, nargs, 0) }, "svg/dimensions") {
+    let svg_str = match get_svg_string(ctx, unsafe { a.arg(args, nargs, 0) }, "svg/dimensions") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -217,9 +217,9 @@ extern "C" fn prim_dimensions(args: *const ElleValue, nargs: usize) -> ElleResul
                 a.float(size.width() as f64),
                 a.float(size.height() as f64),
             ];
-            a.ok(a.array(&elems))
+            a.ok(a.array(ctx, &elems))
         }
-        Err(e) => a.err("svg-error", &format!("svg/dimensions: {}", e)),
+        Err(e) => a.err(ctx, "svg-error", &format!("svg/dimensions: {}", e)),
     }
 }
 
