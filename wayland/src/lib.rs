@@ -15,7 +15,7 @@ use std::os::unix::io::{AsFd, AsRawFd};
 use wayland_client::{Connection, EventQueue};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-use elle_plugin::{EllePrimDef, ElleResult, ElleValue, SIG_OK};
+use elle_plugin::{ElleCtx, EllePrimDef, ElleResult, ElleValue, SIG_OK};
 
 use buffer::ShmBuffer;
 use layer::LayerSurface;
@@ -83,7 +83,7 @@ fn parse_anchor(a: &elle_plugin::Api, v: ElleValue) -> zwlr_layer_surface_v1::An
 
 // ── Event → ElleValue conversion ──────────────────────────────────────
 
-fn event_to_value(ev: &WlEvent) -> ElleValue {
+fn event_to_value(ctx: *mut ElleCtx, ev: &WlEvent) -> ElleValue {
     let a = api();
     match ev {
         WlEvent::Output {
@@ -92,18 +92,18 @@ fn event_to_value(ev: &WlEvent) -> ElleValue {
             width,
             height,
             scale,
-        } => a.build_struct(&[
+        } => a.build_struct(ctx, &[
             ("type", a.keyword("output")),
             ("id", a.int(*id as i64)),
-            ("name", a.string(name)),
+            ("name", a.string(ctx, name)),
             ("width", a.int(*width as i64)),
             ("height", a.int(*height as i64)),
             ("scale", a.int(*scale as i64)),
         ]),
-        WlEvent::Seat { id, name, caps } => a.build_struct(&[
+        WlEvent::Seat { id, name, caps } => a.build_struct(ctx, &[
             ("type", a.keyword("seat")),
             ("id", a.int(*id as i64)),
-            ("name", a.string(name)),
+            ("name", a.string(ctx, name)),
             ("caps", a.int(*caps as i64)),
         ]),
         WlEvent::Configure {
@@ -111,45 +111,45 @@ fn event_to_value(ev: &WlEvent) -> ElleValue {
             serial,
             width,
             height,
-        } => a.build_struct(&[
+        } => a.build_struct(ctx, &[
             ("type", a.keyword("configure")),
             ("surface-id", a.int(*surface_id as i64)),
             ("serial", a.int(*serial as i64)),
             ("width", a.int(*width as i64)),
             ("height", a.int(*height as i64)),
         ]),
-        WlEvent::Closed { surface_id } => a.build_struct(&[
+        WlEvent::Closed { surface_id } => a.build_struct(ctx, &[
             ("type", a.keyword("closed")),
             ("surface-id", a.int(*surface_id as i64)),
         ]),
-        WlEvent::BufferRelease { buffer_id } => a.build_struct(&[
+        WlEvent::BufferRelease { buffer_id } => a.build_struct(ctx, &[
             ("type", a.keyword("buffer-release")),
             ("buffer-id", a.int(*buffer_id as i64)),
         ]),
-        WlEvent::ScreencopyReady { frame_id } => a.build_struct(&[
+        WlEvent::ScreencopyReady { frame_id } => a.build_struct(ctx, &[
             ("type", a.keyword("screencopy-ready")),
             ("frame-id", a.int(*frame_id as i64)),
         ]),
-        WlEvent::ScreencopyFailed { frame_id } => a.build_struct(&[
+        WlEvent::ScreencopyFailed { frame_id } => a.build_struct(ctx, &[
             ("type", a.keyword("screencopy-failed")),
             ("frame-id", a.int(*frame_id as i64)),
         ]),
-        WlEvent::ToplevelNew { id, title, app_id } => a.build_struct(&[
+        WlEvent::ToplevelNew { id, title, app_id } => a.build_struct(ctx, &[
             ("type", a.keyword("toplevel-new")),
             ("id", a.int(*id as i64)),
-            ("title", a.string(title)),
-            ("app-id", a.string(app_id)),
+            ("title", a.string(ctx, title)),
+            ("app-id", a.string(ctx, app_id)),
         ]),
         WlEvent::ToplevelDone { id, title, state } => {
             let state_vals: Vec<ElleValue> = state.iter().map(|s| a.keyword(s)).collect();
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("type", a.keyword("toplevel-done")),
                 ("id", a.int(*id as i64)),
-                ("title", a.string(title)),
-                ("state", a.set(&state_vals)),
+                ("title", a.string(ctx, title)),
+                ("state", a.set(ctx, &state_vals)),
             ])
         }
-        WlEvent::ToplevelClosed { id } => a.build_struct(&[
+        WlEvent::ToplevelClosed { id } => a.build_struct(ctx, &[
             ("type", a.keyword("toplevel-closed")),
             ("id", a.int(*id as i64)),
         ]),
@@ -158,13 +158,13 @@ fn event_to_value(ev: &WlEvent) -> ElleValue {
 
 // ── Connection primitives ─────────────────────────────────────────────
 
-extern "C" fn prim_connect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_connect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let _ = unsafe { a.args(args, nargs) };
 
     let conn = match Connection::connect_to_env() {
         Ok(c) => c,
-        Err(e) => return a.err("wayland-error", &format!("connect failed: {}", e)),
+        Err(e) => return a.err(ctx, "wayland-error", &format!("connect failed: {}", e)),
     };
 
     let display = conn.display();
@@ -175,7 +175,7 @@ extern "C" fn prim_connect(args: *const ElleValue, nargs: usize) -> ElleResult {
     let mut state = WaylandState::new();
     // Do initial roundtrip to bind globals
     if let Err(e) = queue.roundtrip(&mut state) {
-        return a.err("wayland-error", &format!("roundtrip failed: {}", e));
+        return a.err(ctx, "wayland-error", &format!("roundtrip failed: {}", e));
     }
 
     let wl = WlConn {
@@ -188,43 +188,43 @@ extern "C" fn prim_connect(args: *const ElleValue, nargs: usize) -> ElleResult {
         next_buffer_id: 1,
     };
 
-    a.ok(a.external("wayland-connection", wl))
+    a.ok(a.external(ctx, "wayland-connection", wl))
 }
 
-extern "C" fn prim_disconnect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_disconnect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let args = unsafe { a.args(args, nargs) };
     if nargs != 1 {
-        return a.err("arity-error", "wl/disconnect: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/disconnect: expected 1 argument");
     }
     // Just drop the connection — the external's drop fn handles cleanup
     let _ = args[0];
     a.ok(a.nil())
 }
 
-extern "C" fn prim_display_fd(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_display_fd(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err("arity-error", "wl/display-fd: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/display-fd: expected 1 argument");
     }
     let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
-        None => return a.err("type-error", "wl/display-fd: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/display-fd: expected wayland connection"),
     };
     let fd = wl.conn.as_fd().as_raw_fd();
     a.ok(a.int(fd as i64))
 }
 
-extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_dispatch(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err("arity-error", "wl/dispatch: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/dispatch: expected 1 argument");
     }
     let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match unsafe { a.get_external_mut::<WlConn>(val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/dispatch: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/dispatch: expected wayland connection"),
     };
     // Non-blocking read from the wire. Caller should ev/poll-fd first.
     if let Some(guard) = wl.queue.prepare_read() {
@@ -232,105 +232,105 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
     }
     match wl.queue.dispatch_pending(&mut wl.state) {
         Ok(n) => a.ok(a.int(n as i64)),
-        Err(e) => a.err("wayland-error", &format!("dispatch failed: {}", e)),
+        Err(e) => a.err(ctx, "wayland-error", &format!("dispatch failed: {}", e)),
     }
 }
 
-extern "C" fn prim_flush(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_flush(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err("arity-error", "wl/flush: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/flush: expected 1 argument");
     }
     let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
-        None => return a.err("type-error", "wl/flush: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/flush: expected wayland connection"),
     };
     if let Err(e) = wl.conn.flush() {
-        return a.err("wayland-error", &format!("flush failed: {}", e));
+        return a.err(ctx, "wayland-error", &format!("flush failed: {}", e));
     }
     a.ok(a.nil())
 }
 
-extern "C" fn prim_poll_events(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_poll_events(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err("arity-error", "wl/poll-events: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/poll-events: expected 1 argument");
     }
     let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match unsafe { a.get_external_mut::<WlConn>(val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/poll-events: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/poll-events: expected wayland connection"),
     };
     let events: Vec<ElleValue> = wl
         .state
         .events
         .drain(..)
-        .map(|e| event_to_value(&e))
+        .map(|e| event_to_value(ctx, &e))
         .collect();
-    a.ok(a.array(&events))
+    a.ok(a.array(ctx, &events))
 }
 
 // ── Query primitives ──────────────────────────────────────────────────
 
-extern "C" fn prim_outputs(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_outputs(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err("arity-error", "wl/outputs: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/outputs: expected 1 argument");
     }
     let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
-        None => return a.err("type-error", "wl/outputs: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/outputs: expected wayland connection"),
     };
     let items: Vec<ElleValue> = wl
         .state
         .outputs
         .iter()
         .map(|o| {
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("id", a.int(o.id as i64)),
-                ("name", a.string(&o.name)),
+                ("name", a.string(ctx, &o.name)),
                 ("width", a.int(o.width as i64)),
                 ("height", a.int(o.height as i64)),
                 ("scale", a.int(o.scale as i64)),
             ])
         })
         .collect();
-    a.ok(a.array(&items))
+    a.ok(a.array(ctx, &items))
 }
 
-extern "C" fn prim_seats(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_seats(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err("arity-error", "wl/seats: expected 1 argument");
+        return a.err(ctx, "arity-error", "wl/seats: expected 1 argument");
     }
     let val = unsafe { a.arg(args, nargs, 0) };
     let wl = match a.get_external::<WlConn>(val, "wayland-connection") {
         Some(w) => w,
-        None => return a.err("type-error", "wl/seats: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/seats: expected wayland connection"),
     };
     let items: Vec<ElleValue> = wl
         .state
         .seats
         .iter()
         .map(|s| {
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("id", a.int(s.id as i64)),
-                ("name", a.string(&s.name)),
+                ("name", a.string(ctx, &s.name)),
                 ("caps", a.int(s.caps as i64)),
             ])
         })
         .collect();
-    a.ok(a.array(&items))
+    a.ok(a.array(ctx, &items))
 }
 
 // ── Layer shell primitives ────────────────────────────────────────────
 
-extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_layer_surface(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs < 1 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/layer-surface: expected at least 1 argument",
         );
@@ -339,7 +339,7 @@ extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleRe
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/layer-surface: expected wayland connection",
             )
@@ -348,12 +348,12 @@ extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleRe
 
     let compositor = match &wl.state.compositor {
         Some(c) => c.clone(),
-        None => return a.err("wayland-error", "compositor not available"),
+        None => return a.err(ctx, "wayland-error", "compositor not available"),
     };
     let layer_shell =
         match &wl.state.layer_shell {
             Some(ls) => ls.clone(),
-            None => return a.err(
+            None => return a.err(ctx, 
                 "wayland-error",
                 "zwlr_layer_shell_v1 not available — compositor does not support wlr-layer-shell",
             ),
@@ -429,7 +429,7 @@ extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleRe
     });
 
     if let Err(e) = wl.conn.flush() {
-        return a.err(
+        return a.err(ctx, 
             "wayland-error",
             &format!("flush after layer-surface creation failed: {}", e),
         );
@@ -438,17 +438,17 @@ extern "C" fn prim_layer_surface(args: *const ElleValue, nargs: usize) -> ElleRe
     a.ok(a.int(sid as i64))
 }
 
-extern "C" fn prim_layer_configure(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_layer_configure(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     let a = api();
     // Configure is handled automatically via events — ack is done in the
     // dispatch impl. This primitive exists for API completeness.
     a.ok(a.nil())
 }
 
-extern "C" fn prim_layer_destroy(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_layer_destroy(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 2 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/layer-destroy: expected 2 arguments (conn, surface-id)",
         );
@@ -456,12 +456,12 @@ extern "C" fn prim_layer_destroy(args: *const ElleValue, nargs: usize) -> ElleRe
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let surface_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/layer-destroy: surface-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/layer-destroy: surface-id must be integer"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/layer-destroy: expected wayland connection",
             )
@@ -473,17 +473,17 @@ extern "C" fn prim_layer_destroy(args: *const ElleValue, nargs: usize) -> ElleRe
         ls.surface.destroy();
     }
     if let Err(e) = wl.conn.flush() {
-        return a.err("wayland-error", &format!("flush failed: {}", e));
+        return a.err(ctx, "wayland-error", &format!("flush failed: {}", e));
     }
     a.ok(a.nil())
 }
 
 // ── Surface ops ───────────────────────────────────────────────────────
 
-extern "C" fn prim_attach(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_attach(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 3 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/attach: expected 3 arguments (conn, surface-id, buffer-id)",
         );
@@ -491,20 +491,20 @@ extern "C" fn prim_attach(args: *const ElleValue, nargs: usize) -> ElleResult {
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let surface_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/attach: surface-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/attach: surface-id must be integer"),
     };
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/attach: buffer-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/attach: buffer-id must be integer"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/attach: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/attach: expected wayland connection"),
     };
     let sidx = match wl.find_surface(surface_id) {
         Some(i) => i,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "wayland-error",
                 &format!("surface {} not found", surface_id),
             )
@@ -512,7 +512,7 @@ extern "C" fn prim_attach(args: *const ElleValue, nargs: usize) -> ElleResult {
     };
     let bidx = match wl.find_buffer(buffer_id) {
         Some(i) => i,
-        None => return a.err("wayland-error", &format!("buffer {} not found", buffer_id)),
+        None => return a.err(ctx, "wayland-error", &format!("buffer {} not found", buffer_id)),
     };
     wl.surfaces[sidx]
         .surface
@@ -520,10 +520,10 @@ extern "C" fn prim_attach(args: *const ElleValue, nargs: usize) -> ElleResult {
     a.ok(a.nil())
 }
 
-extern "C" fn prim_damage(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_damage(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 6 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/damage: expected 6 arguments (conn, surface-id, x, y, w, h)",
         );
@@ -531,32 +531,32 @@ extern "C" fn prim_damage(args: *const ElleValue, nargs: usize) -> ElleResult {
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let surface_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/damage: surface-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/damage: surface-id must be integer"),
     };
     let x = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/damage: x must be integer"),
+        None => return a.err(ctx, "type-error", "wl/damage: x must be integer"),
     };
     let y = match a.get_int(unsafe { a.arg(args, nargs, 3) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/damage: y must be integer"),
+        None => return a.err(ctx, "type-error", "wl/damage: y must be integer"),
     };
     let w = match a.get_int(unsafe { a.arg(args, nargs, 4) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/damage: width must be integer"),
+        None => return a.err(ctx, "type-error", "wl/damage: width must be integer"),
     };
     let h = match a.get_int(unsafe { a.arg(args, nargs, 5) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/damage: height must be integer"),
+        None => return a.err(ctx, "type-error", "wl/damage: height must be integer"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/damage: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/damage: expected wayland connection"),
     };
     let sidx = match wl.find_surface(surface_id) {
         Some(i) => i,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "wayland-error",
                 &format!("surface {} not found", surface_id),
             )
@@ -566,10 +566,10 @@ extern "C" fn prim_damage(args: *const ElleValue, nargs: usize) -> ElleResult {
     a.ok(a.nil())
 }
 
-extern "C" fn prim_commit(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_commit(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 2 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/commit: expected 2 arguments (conn, surface-id)",
         );
@@ -577,16 +577,16 @@ extern "C" fn prim_commit(args: *const ElleValue, nargs: usize) -> ElleResult {
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let surface_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/commit: surface-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/commit: surface-id must be integer"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/commit: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/commit: expected wayland connection"),
     };
     let sidx = match wl.find_surface(surface_id) {
         Some(i) => i,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "wayland-error",
                 &format!("surface {} not found", surface_id),
             )
@@ -594,17 +594,17 @@ extern "C" fn prim_commit(args: *const ElleValue, nargs: usize) -> ElleResult {
     };
     wl.surfaces[sidx].surface.commit();
     if let Err(e) = wl.conn.flush() {
-        return a.err("wayland-error", &format!("flush failed: {}", e));
+        return a.err(ctx, "wayland-error", &format!("flush failed: {}", e));
     }
     a.ok(a.nil())
 }
 
 // ── SHM buffer primitives ─────────────────────────────────────────────
 
-extern "C" fn prim_shm_buffer(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_shm_buffer(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 3 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/shm-buffer: expected 3 arguments (conn, width, height)",
         );
@@ -612,21 +612,21 @@ extern "C" fn prim_shm_buffer(args: *const ElleValue, nargs: usize) -> ElleResul
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let width = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(w) => w as i32,
-        None => return a.err("type-error", "wl/shm-buffer: width must be integer"),
+        None => return a.err(ctx, "type-error", "wl/shm-buffer: width must be integer"),
     };
     let height = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(h) => h as i32,
-        None => return a.err("type-error", "wl/shm-buffer: height must be integer"),
+        None => return a.err(ctx, "type-error", "wl/shm-buffer: height must be integer"),
     };
 
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/shm-buffer: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/shm-buffer: expected wayland connection"),
     };
 
     let shm = match &wl.state.shm {
         Some(s) => s.clone(),
-        None => return a.err("wayland-error", "wl_shm not available"),
+        None => return a.err(ctx, "wayland-error", "wl_shm not available"),
     };
 
     let bid = wl.next_buffer_id;
@@ -638,14 +638,14 @@ extern "C" fn prim_shm_buffer(args: *const ElleValue, nargs: usize) -> ElleResul
             wl.buffers.push(buf);
             a.ok(a.int(bid as i64))
         }
-        Err(e) => a.err("wayland-error", &e),
+        Err(e) => a.err(ctx, "wayland-error", &e),
     }
 }
 
-extern "C" fn prim_buffer_write(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_buffer_write(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 4 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/buffer-write: expected 4 arguments (conn, buffer-id, offset, data)",
         );
@@ -653,35 +653,35 @@ extern "C" fn prim_buffer_write(args: *const ElleValue, nargs: usize) -> ElleRes
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/buffer-write: buffer-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-write: buffer-id must be integer"),
     };
     let offset = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(o) => o as usize,
-        None => return a.err("type-error", "wl/buffer-write: offset must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-write: offset must be integer"),
     };
     let data_val = unsafe { a.arg(args, nargs, 3) };
     let data = match a.get_bytes(data_val) {
         Some(b) => b,
-        None => return a.err("type-error", "wl/buffer-write: data must be bytes"),
+        None => return a.err(ctx, "type-error", "wl/buffer-write: data must be bytes"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/buffer-write: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/buffer-write: expected wayland connection"),
     };
     let bidx = match wl.find_buffer(buffer_id) {
         Some(i) => i,
-        None => return a.err("wayland-error", &format!("buffer {} not found", buffer_id)),
+        None => return a.err(ctx, "wayland-error", &format!("buffer {} not found", buffer_id)),
     };
     match wl.buffers[bidx].write(offset, data) {
         Ok(()) => a.ok(a.nil()),
-        Err(e) => a.err("wayland-error", &e),
+        Err(e) => a.err(ctx, "wayland-error", &e),
     }
 }
 
-extern "C" fn prim_buffer_fill(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_buffer_fill(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 3 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/buffer-fill: expected 3 arguments (conn, buffer-id, color)",
         );
@@ -689,28 +689,28 @@ extern "C" fn prim_buffer_fill(args: *const ElleValue, nargs: usize) -> ElleResu
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/buffer-fill: buffer-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill: buffer-id must be integer"),
     };
     let color = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(c) => c as u32,
-        None => return a.err("type-error", "wl/buffer-fill: color must be integer (ARGB)"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill: color must be integer (ARGB)"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
-        None => return a.err("type-error", "wl/buffer-fill: expected wayland connection"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill: expected wayland connection"),
     };
     let bidx = match wl.find_buffer(buffer_id) {
         Some(i) => i,
-        None => return a.err("wayland-error", &format!("buffer {} not found", buffer_id)),
+        None => return a.err(ctx, "wayland-error", &format!("buffer {} not found", buffer_id)),
     };
     wl.buffers[bidx].fill(color);
     a.ok(a.nil())
 }
 
-extern "C" fn prim_buffer_fill_rect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_buffer_fill_rect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 7 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/buffer-fill-rect: expected 7 arguments (conn, buffer-id, x, y, w, h, color)",
         );
@@ -719,7 +719,7 @@ extern "C" fn prim_buffer_fill_rect(args: *const ElleValue, nargs: usize) -> Ell
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-rect: buffer-id must be integer",
             )
@@ -727,24 +727,24 @@ extern "C" fn prim_buffer_fill_rect(args: *const ElleValue, nargs: usize) -> Ell
     };
     let x = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-rect: x must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-rect: x must be integer"),
     };
     let y = match a.get_int(unsafe { a.arg(args, nargs, 3) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-rect: y must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-rect: y must be integer"),
     };
     let w = match a.get_int(unsafe { a.arg(args, nargs, 4) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-rect: width must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-rect: width must be integer"),
     };
     let h = match a.get_int(unsafe { a.arg(args, nargs, 5) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-rect: height must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-rect: height must be integer"),
     };
     let color = match a.get_int(unsafe { a.arg(args, nargs, 6) }) {
         Some(c) => c as u32,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-rect: color must be integer (ARGB)",
             )
@@ -753,7 +753,7 @@ extern "C" fn prim_buffer_fill_rect(args: *const ElleValue, nargs: usize) -> Ell
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-rect: expected wayland connection",
             )
@@ -761,16 +761,16 @@ extern "C" fn prim_buffer_fill_rect(args: *const ElleValue, nargs: usize) -> Ell
     };
     let bidx = match wl.find_buffer(buffer_id) {
         Some(i) => i,
-        None => return a.err("wayland-error", &format!("buffer {} not found", buffer_id)),
+        None => return a.err(ctx, "wayland-error", &format!("buffer {} not found", buffer_id)),
     };
     wl.buffers[bidx].fill_rect(x, y, w, h, color);
     a.ok(a.nil())
 }
 
-extern "C" fn prim_buffer_fill_circle(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_buffer_fill_circle(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 6 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/buffer-fill-circle: expected 6 arguments (conn, buffer-id, cx, cy, r, color)",
         );
@@ -779,7 +779,7 @@ extern "C" fn prim_buffer_fill_circle(args: *const ElleValue, nargs: usize) -> E
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-circle: buffer-id must be integer",
             )
@@ -787,20 +787,20 @@ extern "C" fn prim_buffer_fill_circle(args: *const ElleValue, nargs: usize) -> E
     };
     let cx = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-circle: cx must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-circle: cx must be integer"),
     };
     let cy = match a.get_int(unsafe { a.arg(args, nargs, 3) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-circle: cy must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-circle: cy must be integer"),
     };
     let r = match a.get_int(unsafe { a.arg(args, nargs, 4) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-circle: r must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-circle: r must be integer"),
     };
     let color = match a.get_int(unsafe { a.arg(args, nargs, 5) }) {
         Some(c) => c as u32,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-circle: color must be integer (ARGB)",
             )
@@ -809,7 +809,7 @@ extern "C" fn prim_buffer_fill_circle(args: *const ElleValue, nargs: usize) -> E
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-circle: expected wayland connection",
             )
@@ -817,22 +817,22 @@ extern "C" fn prim_buffer_fill_circle(args: *const ElleValue, nargs: usize) -> E
     };
     let bidx = match wl.find_buffer(buffer_id) {
         Some(i) => i,
-        None => return a.err("wayland-error", &format!("buffer {} not found", buffer_id)),
+        None => return a.err(ctx, "wayland-error", &format!("buffer {} not found", buffer_id)),
     };
     wl.buffers[bidx].fill_circle(cx, cy, r, color);
     a.ok(a.nil())
 }
 
-extern "C" fn prim_buffer_fill_triangle(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_buffer_fill_triangle(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 9 {
-        return a.err("arity-error", "wl/buffer-fill-triangle: expected 9 arguments (conn, buffer-id, x1, y1, x2, y2, x3, y3, color)");
+        return a.err(ctx, "arity-error", "wl/buffer-fill-triangle: expected 9 arguments (conn, buffer-id, x1, y1, x2, y2, x3, y3, color)");
     }
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-triangle: buffer-id must be integer",
             )
@@ -840,32 +840,32 @@ extern "C" fn prim_buffer_fill_triangle(args: *const ElleValue, nargs: usize) ->
     };
     let x1 = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-triangle: x1 must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-triangle: x1 must be integer"),
     };
     let y1 = match a.get_int(unsafe { a.arg(args, nargs, 3) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-triangle: y1 must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-triangle: y1 must be integer"),
     };
     let x2 = match a.get_int(unsafe { a.arg(args, nargs, 4) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-triangle: x2 must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-triangle: x2 must be integer"),
     };
     let y2 = match a.get_int(unsafe { a.arg(args, nargs, 5) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-triangle: y2 must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-triangle: y2 must be integer"),
     };
     let x3 = match a.get_int(unsafe { a.arg(args, nargs, 6) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-triangle: x3 must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-triangle: x3 must be integer"),
     };
     let y3 = match a.get_int(unsafe { a.arg(args, nargs, 7) }) {
         Some(v) => v as i32,
-        None => return a.err("type-error", "wl/buffer-fill-triangle: y3 must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-fill-triangle: y3 must be integer"),
     };
     let color = match a.get_int(unsafe { a.arg(args, nargs, 8) }) {
         Some(c) => c as u32,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-triangle: color must be integer (ARGB)",
             )
@@ -874,7 +874,7 @@ extern "C" fn prim_buffer_fill_triangle(args: *const ElleValue, nargs: usize) ->
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-fill-triangle: expected wayland connection",
             )
@@ -882,16 +882,16 @@ extern "C" fn prim_buffer_fill_triangle(args: *const ElleValue, nargs: usize) ->
     };
     let bidx = match wl.find_buffer(buffer_id) {
         Some(i) => i,
-        None => return a.err("wayland-error", &format!("buffer {} not found", buffer_id)),
+        None => return a.err(ctx, "wayland-error", &format!("buffer {} not found", buffer_id)),
     };
     wl.buffers[bidx].fill_triangle(x1, y1, x2, y2, x3, y3, color);
     a.ok(a.nil())
 }
 
-extern "C" fn prim_buffer_destroy(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_buffer_destroy(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 2 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             "wl/buffer-destroy: expected 2 arguments (conn, buffer-id)",
         );
@@ -899,12 +899,12 @@ extern "C" fn prim_buffer_destroy(args: *const ElleValue, nargs: usize) -> ElleR
     let conn_val = unsafe { a.arg(args, nargs, 0) };
     let buffer_id = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(id) => id as u32,
-        None => return a.err("type-error", "wl/buffer-destroy: buffer-id must be integer"),
+        None => return a.err(ctx, "type-error", "wl/buffer-destroy: buffer-id must be integer"),
     };
     let wl = match unsafe { a.get_external_mut::<WlConn>(conn_val, "wayland-connection") } {
         Some(w) => w,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 "wl/buffer-destroy: expected wayland connection",
             )
@@ -918,29 +918,29 @@ extern "C" fn prim_buffer_destroy(args: *const ElleValue, nargs: usize) -> ElleR
 
 // ── Screencopy primitives ─────────────────────────────────────────────
 
-extern "C" fn prim_screencopy(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_screencopy(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     api().ok(api().nil())
 }
 
-extern "C" fn prim_screencopy_destroy(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_screencopy_destroy(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     api().ok(api().nil())
 }
 
 // ── Foreign toplevel primitives ───────────────────────────────────────
 
-extern "C" fn prim_toplevels(_args: *const ElleValue, _nargs: usize) -> ElleResult {
-    api().ok(api().array(&[]))
+extern "C" fn prim_toplevels(ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
+    api().ok(api().array(ctx, &[]))
 }
 
-extern "C" fn prim_toplevel_activate(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_toplevel_activate(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     api().ok(api().nil())
 }
 
-extern "C" fn prim_toplevel_close(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_toplevel_close(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     api().ok(api().nil())
 }
 
-extern "C" fn prim_toplevel_subscribe(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_toplevel_subscribe(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     api().ok(api().nil())
 }
 
