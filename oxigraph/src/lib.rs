@@ -1,6 +1,6 @@
 //! Elle oxigraph plugin — RDF quad storage + SPARQL via the `oxigraph` crate.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 use oxigraph::io::{RdfFormat, RdfSerializer};
 use oxigraph::model::{
@@ -183,117 +183,117 @@ elle_plugin::define_plugin!("oxigraph/", &PRIMITIVES);
 // ---------------------------------------------------------------------------
 
 /// Build an Elle array representing an RDF IRI: `[:iri "http://..."]`.
-fn iri_to_elle(n: &NamedNode) -> ElleValue {
+fn iri_to_elle(ctx: *mut ElleCtx, n: &NamedNode) -> ElleValue {
     let a = api();
-    a.array(&[a.keyword("iri"), a.string(n.as_str())])
+    a.array(ctx, &[a.keyword("iri"), a.string(ctx, n.as_str())])
 }
 
 /// Build an Elle array representing an RDF blank node: `[:bnode "id"]`.
-fn bnode_to_elle(b: &BlankNode) -> ElleValue {
+fn bnode_to_elle(ctx: *mut ElleCtx, b: &BlankNode) -> ElleValue {
     let a = api();
-    a.array(&[a.keyword("bnode"), a.string(b.as_str())])
+    a.array(ctx, &[a.keyword("bnode"), a.string(ctx, b.as_str())])
 }
 
 /// Build an Elle array representing an RDF literal.
-fn literal_to_elle(l: &Literal) -> ElleValue {
+fn literal_to_elle(ctx: *mut ElleCtx, l: &Literal) -> ElleValue {
     let a = api();
     if let Some(lang) = l.language() {
-        a.array(&[
+        a.array(ctx, &[
             a.keyword("literal"),
-            a.string(l.value()),
+            a.string(ctx, l.value()),
             a.keyword("lang"),
-            a.string(lang),
+            a.string(ctx, lang),
         ])
     } else {
         let dt = l.datatype().as_str();
         const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
         if dt == XSD_STRING {
-            a.array(&[a.keyword("literal"), a.string(l.value())])
+            a.array(ctx, &[a.keyword("literal"), a.string(ctx, l.value())])
         } else {
-            a.array(&[
+            a.array(ctx, &[
                 a.keyword("literal"),
-                a.string(l.value()),
+                a.string(ctx, l.value()),
                 a.keyword("datatype"),
-                a.string(dt),
+                a.string(ctx, dt),
             ])
         }
     }
 }
 
 /// Convert an oxigraph `Term` to an Elle array.
-fn term_to_elle(term: &Term) -> ElleValue {
+fn term_to_elle(ctx: *mut ElleCtx, term: &Term) -> ElleValue {
     match term {
-        Term::NamedNode(n) => iri_to_elle(n),
-        Term::BlankNode(b) => bnode_to_elle(b),
-        Term::Literal(l) => literal_to_elle(l),
+        Term::NamedNode(n) => iri_to_elle(ctx, n),
+        Term::BlankNode(b) => bnode_to_elle(ctx, b),
+        Term::Literal(l) => literal_to_elle(ctx, l),
     }
 }
 
 /// Convert an Elle term array to an oxigraph `Term`.
-fn elle_to_term(val: ElleValue, prim: &str) -> Result<Term, ElleResult> {
+fn elle_to_term(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<Term, ElleResult> {
     let a = api();
     let len = a.get_array_len(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected term array, got {}", prim, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected term array, got {}", prim, a.type_name(val)))
     })?;
 
     let first = a.get_array_item(val, 0);
     let tag = a.get_keyword_name(first).ok_or_else(|| {
-        a.err("type-error", &format!("{}: term array must start with a keyword tag", prim))
+        a.err(ctx, "type-error", &format!("{}: term array must start with a keyword tag", prim))
     })?;
 
     match tag {
         "iri" => {
-            let s = string_at(val, 1, len, prim, "IRI string")?;
+            let s = string_at(ctx, val, 1, len, prim, "IRI string")?;
             NamedNode::new(&s)
                 .map(Term::from)
-                .map_err(|e| oxigraph_err(prim, e))
+                .map_err(|e| oxigraph_err(ctx, prim, e))
         }
         "bnode" => {
-            let s = string_at(val, 1, len, prim, "blank node id")?;
+            let s = string_at(ctx, val, 1, len, prim, "blank node id")?;
             BlankNode::new(&s)
                 .map(Term::from)
-                .map_err(|e| oxigraph_err(prim, e))
+                .map_err(|e| oxigraph_err(ctx, prim, e))
         }
         "literal" => {
-            let value = string_at(val, 1, len, prim, "literal value")?;
+            let value = string_at(ctx, val, 1, len, prim, "literal value")?;
             if len == 2 {
                 Ok(Term::from(Literal::new_simple_literal(&value)))
             } else if len == 4 {
                 let key_val = a.get_array_item(val, 2);
                 let key = a.get_keyword_name(key_val).ok_or_else(|| {
-                    a.err("type-error", &format!("{}: expected :lang or :datatype keyword at index 2", prim))
+                    a.err(ctx, "type-error", &format!("{}: expected :lang or :datatype keyword at index 2", prim))
                 })?;
-                let tag_val = string_at(val, 3, len, prim, "tag value")?;
+                let tag_val = string_at(ctx, val, 3, len, prim, "tag value")?;
                 match key {
                     "lang" => Literal::new_language_tagged_literal(&value, &tag_val)
                         .map(Term::from)
-                        .map_err(|e| oxigraph_err(prim, e)),
+                        .map_err(|e| oxigraph_err(ctx, prim, e)),
                     "datatype" => {
-                        let dt = NamedNode::new(&tag_val).map_err(|e| oxigraph_err(prim, e))?;
+                        let dt = NamedNode::new(&tag_val).map_err(|e| oxigraph_err(ctx, prim, e))?;
                         Ok(Term::from(Literal::new_typed_literal(&value, dt)))
                     }
-                    _ => Err(a.err("type-error", &format!("{}: expected :lang or :datatype, got :{}", prim, key))),
+                    _ => Err(a.err(ctx, "type-error", &format!("{}: expected :lang or :datatype, got :{}", prim, key))),
                 }
             } else {
-                Err(a.err("type-error", &format!("{}: :literal array must have length 2 or 4, got {}", prim, len)))
+                Err(a.err(ctx, "type-error", &format!("{}: :literal array must have length 2 or 4, got {}", prim, len)))
             }
         }
-        _ => Err(a.err("type-error", &format!("{}: unknown term tag :{}", prim, tag))),
+        _ => Err(a.err(ctx, "type-error", &format!("{}: unknown term tag :{}", prim, tag))),
     }
 }
 
 /// Convert an Elle graph-name value to an oxigraph `GraphName`.
-fn elle_to_graph_name(val: ElleValue, prim: &str) -> Result<GraphName, ElleResult> {
+fn elle_to_graph_name(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<GraphName, ElleResult> {
     let a = api();
     if a.check_nil(val) {
         return Ok(GraphName::DefaultGraph);
     }
-    let term = elle_to_term(val, prim)?;
+    let term = elle_to_term(ctx, val, prim)?;
     match term {
         Term::NamedNode(n) => Ok(GraphName::NamedNode(n)),
         Term::BlankNode(b) => Ok(GraphName::BlankNode(b)),
         Term::Literal(_) => {
-            Err(a.err("type-error", &format!("{}: graph name must be an IRI or blank node", prim)))
+            Err(a.err(ctx, "type-error", &format!("{}: graph name must be an IRI or blank node", prim)))
         }
     }
 }
@@ -304,6 +304,7 @@ fn elle_to_graph_name(val: ElleValue, prim: &str) -> Result<GraphName, ElleResul
 
 /// Extract a string from array element at index.
 fn string_at(
+    ctx: *mut ElleCtx,
     arr: ElleValue,
     index: usize,
     len: usize,
@@ -312,27 +313,27 @@ fn string_at(
 ) -> Result<String, ElleResult> {
     let a = api();
     if index >= len {
-        return Err(a.err("type-error", &format!("{}: expected string at index {} ({}), got (missing)", prim, index, what)));
+        return Err(a.err(ctx, "type-error", &format!("{}: expected string at index {} ({}), got (missing)", prim, index, what)));
     }
     let v = a.get_array_item(arr, index);
     a.get_string(v)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            a.err("type-error", &format!("{}: expected string at index {} ({}), got {}", prim, index, what, a.type_name(v)))
+            a.err(ctx, "type-error", &format!("{}: expected string at index {} ({}), got {}", prim, index, what, a.type_name(v)))
         })
 }
 
 /// Map any `Display` error to an `oxigraph-error` signal.
-fn oxigraph_err(prim: &str, e: impl std::fmt::Display) -> ElleResult {
-    api().err("oxigraph-error", &format!("{}: {}", prim, e))
+fn oxigraph_err(ctx: *mut ElleCtx, prim: &str, e: impl std::fmt::Display) -> ElleResult {
+    api().err(ctx, "oxigraph-error", &format!("{}: {}", prim, e))
 }
 
 /// Extract `Store` from args[0], or return a type-error.
-fn get_store<'a>(args: *const ElleValue, nargs: usize, prim: &str) -> Result<&'a Store, ElleResult> {
+fn get_store<'a>(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize, prim: &str) -> Result<&'a Store, ElleResult> {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     a.get_external::<Store>(v, "oxigraph/store").ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected oxigraph/store, got {}", prim, a.type_name(v)))
+        a.err(ctx, "type-error", &format!("{}: expected oxigraph/store, got {}", prim, a.type_name(v)))
     })
 }
 
@@ -340,27 +341,27 @@ fn get_store<'a>(args: *const ElleValue, nargs: usize, prim: &str) -> Result<&'a
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_store_new(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_store_new(ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     let a = api();
     match Store::new() {
-        Ok(store) => a.ok(a.external("oxigraph/store", store)),
-        Err(e) => oxigraph_err("oxigraph/store-new", e),
+        Ok(store) => a.ok(a.external(ctx, "oxigraph/store", store)),
+        Err(e) => oxigraph_err(ctx, "oxigraph/store-new", e),
     }
 }
 
-extern "C" fn prim_store_open(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_store_open(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let path = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("oxigraph/store-open: expected string path, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("oxigraph/store-open: expected string path, got {}", a.type_name(v))),
     };
 
     // Clamp RLIMIT_NOFILE so RocksDB doesn't panic on unlimited fd limits.
     #[cfg(unix)]
     let saved_rlimit = match rlimit::clamp_nofile() {
         Ok(s) => s,
-        Err(e) => return oxigraph_err("oxigraph/store-open", e),
+        Err(e) => return oxigraph_err(ctx, "oxigraph/store-open", e),
     };
 
     let saved_stdout = save_fd(1);
@@ -373,85 +374,85 @@ extern "C" fn prim_store_open(args: *const ElleValue, nargs: usize) -> ElleResul
     if let Some(s) = saved_rlimit { rlimit::restore_nofile(s); }
 
     match result {
-        Ok(store) => a.ok(a.external("oxigraph/store", store)),
-        Err(e) => oxigraph_err("oxigraph/store-open", e),
+        Ok(store) => a.ok(a.external(ctx, "oxigraph/store", store)),
+        Err(e) => oxigraph_err(ctx, "oxigraph/store-open", e),
     }
 }
 
-extern "C" fn prim_iri(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_iri(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let s = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("oxigraph/iri: expected string, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("oxigraph/iri: expected string, got {}", a.type_name(v))),
     };
     match NamedNode::new(&s) {
-        Ok(n) => a.ok(iri_to_elle(&n)),
-        Err(e) => oxigraph_err("oxigraph/iri", e),
+        Ok(n) => a.ok(iri_to_elle(ctx, &n)),
+        Err(e) => oxigraph_err(ctx, "oxigraph/iri", e),
     }
 }
 
-extern "C" fn prim_literal(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_literal(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v0 = unsafe { a.arg(args, nargs, 0) };
     let value = match a.get_string(v0) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("oxigraph/literal: expected string value, got {}", a.type_name(v0))),
+        None => return a.err(ctx, "type-error", &format!("oxigraph/literal: expected string value, got {}", a.type_name(v0))),
     };
 
     if nargs == 1 {
-        return a.ok(a.array(&[a.keyword("literal"), a.string(&value)]));
+        return a.ok(a.array(ctx, &[a.keyword("literal"), a.string(ctx, &value)]));
     }
 
     let v1 = unsafe { a.arg(args, nargs, 1) };
     let tag_key = match a.get_keyword_name(v1) {
         Some(k) => k.to_string(),
-        None => return a.err("type-error", &format!("oxigraph/literal: expected :lang or :datatype keyword, got {}", a.type_name(v1))),
+        None => return a.err(ctx, "type-error", &format!("oxigraph/literal: expected :lang or :datatype keyword, got {}", a.type_name(v1))),
     };
     let v2 = unsafe { a.arg(args, nargs, 2) };
     let tag_val = match a.get_string(v2) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("oxigraph/literal: expected string tag value, got {}", a.type_name(v2))),
+        None => return a.err(ctx, "type-error", &format!("oxigraph/literal: expected string tag value, got {}", a.type_name(v2))),
     };
 
     match tag_key.as_str() {
         "lang" => {
             match Literal::new_language_tagged_literal(&value, &tag_val) {
-                Ok(_) => a.ok(a.array(&[
+                Ok(_) => a.ok(a.array(ctx, &[
                     a.keyword("literal"),
-                    a.string(&value),
+                    a.string(ctx, &value),
                     a.keyword("lang"),
-                    a.string(&tag_val),
+                    a.string(ctx, &tag_val),
                 ])),
-                Err(e) => oxigraph_err("oxigraph/literal", e),
+                Err(e) => oxigraph_err(ctx, "oxigraph/literal", e),
             }
         }
         "datatype" => {
-            a.ok(a.array(&[
+            a.ok(a.array(ctx, &[
                 a.keyword("literal"),
-                a.string(&value),
+                a.string(ctx, &value),
                 a.keyword("datatype"),
-                a.string(&tag_val),
+                a.string(ctx, &tag_val),
             ]))
         }
-        _ => a.err("type-error", &format!("oxigraph/literal: expected :lang or :datatype, got :{}", tag_key)),
+        _ => a.err(ctx, "type-error", &format!("oxigraph/literal: expected :lang or :datatype, got :{}", tag_key)),
     }
 }
 
-extern "C" fn prim_blank_node(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_blank_node(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs == 0 {
         let b = BlankNode::default();
-        return a.ok(bnode_to_elle(&b));
+        return a.ok(bnode_to_elle(ctx, &b));
     }
     let v = unsafe { a.arg(args, nargs, 0) };
     let id = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("oxigraph/blank-node: expected string id, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("oxigraph/blank-node: expected string id, got {}", a.type_name(v))),
     };
     match BlankNode::new(&id) {
-        Ok(b) => a.ok(bnode_to_elle(&b)),
-        Err(e) => oxigraph_err("oxigraph/blank-node", e),
+        Ok(b) => a.ok(bnode_to_elle(ctx, &b)),
+        Err(e) => oxigraph_err(ctx, "oxigraph/blank-node", e),
     }
 }
 
@@ -459,56 +460,56 @@ extern "C" fn prim_blank_node(args: *const ElleValue, nargs: usize) -> ElleResul
 // Quad conversion helpers
 // ---------------------------------------------------------------------------
 
-fn graph_name_to_elle(gn: &GraphName) -> ElleValue {
+fn graph_name_to_elle(ctx: *mut ElleCtx, gn: &GraphName) -> ElleValue {
     let a = api();
     match gn {
         GraphName::DefaultGraph => a.nil(),
-        GraphName::NamedNode(n) => iri_to_elle(n),
-        GraphName::BlankNode(b) => bnode_to_elle(b),
+        GraphName::NamedNode(n) => iri_to_elle(ctx, n),
+        GraphName::BlankNode(b) => bnode_to_elle(ctx, b),
     }
 }
 
-fn subject_to_elle(s: &NamedOrBlankNode) -> ElleValue {
+fn subject_to_elle(ctx: *mut ElleCtx, s: &NamedOrBlankNode) -> ElleValue {
     match s {
-        NamedOrBlankNode::NamedNode(n) => iri_to_elle(n),
-        NamedOrBlankNode::BlankNode(b) => bnode_to_elle(b),
+        NamedOrBlankNode::NamedNode(n) => iri_to_elle(ctx, n),
+        NamedOrBlankNode::BlankNode(b) => bnode_to_elle(ctx, b),
     }
 }
 
-fn oxigraph_quad_to_elle(quad: &Quad) -> ElleValue {
+fn oxigraph_quad_to_elle(ctx: *mut ElleCtx, quad: &Quad) -> ElleValue {
     let a = api();
-    a.array(&[
-        subject_to_elle(&quad.subject),
-        iri_to_elle(&quad.predicate),
-        term_to_elle(&quad.object),
-        graph_name_to_elle(&quad.graph_name),
+    a.array(ctx, &[
+        subject_to_elle(ctx, &quad.subject),
+        iri_to_elle(ctx, &quad.predicate),
+        term_to_elle(ctx, &quad.object),
+        graph_name_to_elle(ctx, &quad.graph_name),
     ])
 }
 
-fn elle_quad_to_oxigraph(val: ElleValue, prim: &str) -> Result<Quad, ElleResult> {
+fn elle_quad_to_oxigraph(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<Quad, ElleResult> {
     let a = api();
     let len = a.get_array_len(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected quad array, got {}", prim, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected quad array, got {}", prim, a.type_name(val)))
     })?;
     if len != 4 {
-        return Err(a.err("type-error", &format!("{}: quad array must have length 4, got {}", prim, len)));
+        return Err(a.err(ctx, "type-error", &format!("{}: quad array must have length 4, got {}", prim, len)));
     }
 
-    let subject_term = elle_to_term(a.get_array_item(val, 0), prim)?;
+    let subject_term = elle_to_term(ctx, a.get_array_item(val, 0), prim)?;
     let subject: NamedOrBlankNode = match subject_term {
         Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
         Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
-        _ => return Err(a.err("type-error", &format!("{}: subject must be an IRI or blank node", prim))),
+        _ => return Err(a.err(ctx, "type-error", &format!("{}: subject must be an IRI or blank node", prim))),
     };
 
-    let pred_term = elle_to_term(a.get_array_item(val, 1), prim)?;
+    let pred_term = elle_to_term(ctx, a.get_array_item(val, 1), prim)?;
     let predicate = match pred_term {
         Term::NamedNode(n) => n,
-        _ => return Err(a.err("type-error", &format!("{}: predicate must be an IRI", prim))),
+        _ => return Err(a.err(ctx, "type-error", &format!("{}: predicate must be an IRI", prim))),
     };
 
-    let object = elle_to_term(a.get_array_item(val, 2), prim)?;
-    let graph_name = elle_to_graph_name(a.get_array_item(val, 3), prim)?;
+    let object = elle_to_term(ctx, a.get_array_item(val, 2), prim)?;
+    let graph_name = elle_to_graph_name(ctx, a.get_array_item(val, 3), prim)?;
 
     Ok(Quad::new(subject, predicate, object, graph_name))
 }
@@ -517,89 +518,89 @@ fn elle_quad_to_oxigraph(val: ElleValue, prim: &str) -> Result<Quad, ElleResult>
 // Quad CRUD primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_insert(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_insert(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let store = match get_store(args, nargs, "oxigraph/insert") {
+    let store = match get_store(ctx, args, nargs, "oxigraph/insert") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(unsafe { a.arg(args, nargs, 1) }, "oxigraph/insert") {
+    let quad = match elle_quad_to_oxigraph(ctx, unsafe { a.arg(args, nargs, 1) }, "oxigraph/insert") {
         Ok(q) => q,
         Err(e) => return e,
     };
     match store.insert(quad.as_ref()) {
         Ok(_) => a.ok(a.nil()),
-        Err(e) => oxigraph_err("oxigraph/insert", e),
+        Err(e) => oxigraph_err(ctx, "oxigraph/insert", e),
     }
 }
 
-extern "C" fn prim_remove(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_remove(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let store = match get_store(args, nargs, "oxigraph/remove") {
+    let store = match get_store(ctx, args, nargs, "oxigraph/remove") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(unsafe { a.arg(args, nargs, 1) }, "oxigraph/remove") {
+    let quad = match elle_quad_to_oxigraph(ctx, unsafe { a.arg(args, nargs, 1) }, "oxigraph/remove") {
         Ok(q) => q,
         Err(e) => return e,
     };
     match store.remove(quad.as_ref()) {
         Ok(_) => a.ok(a.nil()),
-        Err(e) => oxigraph_err("oxigraph/remove", e),
+        Err(e) => oxigraph_err(ctx, "oxigraph/remove", e),
     }
 }
 
-extern "C" fn prim_contains(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_contains(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let store = match get_store(args, nargs, "oxigraph/contains") {
+    let store = match get_store(ctx, args, nargs, "oxigraph/contains") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(unsafe { a.arg(args, nargs, 1) }, "oxigraph/contains") {
+    let quad = match elle_quad_to_oxigraph(ctx, unsafe { a.arg(args, nargs, 1) }, "oxigraph/contains") {
         Ok(q) => q,
         Err(e) => return e,
     };
     match store.contains(quad.as_ref()) {
         Ok(result) => a.ok(a.boolean(result)),
-        Err(e) => oxigraph_err("oxigraph/contains", e),
+        Err(e) => oxigraph_err(ctx, "oxigraph/contains", e),
     }
 }
 
-extern "C" fn prim_quads(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_quads(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let store = match get_store(args, nargs, "oxigraph/quads") {
+    let store = match get_store(ctx, args, nargs, "oxigraph/quads") {
         Ok(s) => s,
         Err(e) => return e,
     };
     let mut result = Vec::new();
     for item in store.quads_for_pattern(None, None, None, None) {
         match item {
-            Ok(quad) => result.push(oxigraph_quad_to_elle(&quad)),
-            Err(e) => return oxigraph_err("oxigraph/quads", e),
+            Ok(quad) => result.push(oxigraph_quad_to_elle(ctx, &quad)),
+            Err(e) => return oxigraph_err(ctx, "oxigraph/quads", e),
         }
     }
-    a.ok(a.array(&result))
+    a.ok(a.array(ctx, &result))
 }
 
-extern "C" fn prim_query(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_query(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     const PRIM: &str = "oxigraph/query";
-    let store = match get_store(args, nargs, PRIM) {
+    let store = match get_store(ctx, args, nargs, PRIM) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let v1 = unsafe { a.arg(args, nargs, 1) };
     let sparql = match a.get_string(v1) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("{}: expected string sparql, got {}", PRIM, a.type_name(v1))),
+        None => return a.err(ctx, "type-error", &format!("{}: expected string sparql, got {}", PRIM, a.type_name(v1))),
     };
     let prepared = match SparqlEvaluator::new().parse_query(&sparql) {
         Ok(q) => q,
-        Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+        Err(e) => return a.err(ctx, "sparql-error", &format!("{}: {}", PRIM, e)),
     };
     let results = match prepared.on_store(store).execute() {
         Ok(r) => r,
-        Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+        Err(e) => return a.err(ctx, "sparql-error", &format!("{}: {}", PRIM, e)),
     };
     match results {
         QueryResults::Solutions(solutions) => {
@@ -607,15 +608,15 @@ extern "C" fn prim_query(args: *const ElleValue, nargs: usize) -> ElleResult {
             for solution in solutions {
                 let solution = match solution {
                     Ok(s) => s,
-                    Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+                    Err(e) => return a.err(ctx, "sparql-error", &format!("{}: {}", PRIM, e)),
                 };
                 let fields: Vec<(&str, ElleValue)> = solution
                     .iter()
-                    .map(|(variable, term)| (variable.as_str(), term_to_elle(term)))
+                    .map(|(variable, term)| (variable.as_str(), term_to_elle(ctx, term)))
                     .collect();
-                rows.push(a.build_struct(&fields));
+                rows.push(a.build_struct(ctx, &fields));
             }
-            a.ok(a.array(&rows))
+            a.ok(a.array(ctx, &rows))
         }
         QueryResults::Boolean(b) => a.ok(a.boolean(b)),
         QueryResults::Graph(triples) => {
@@ -623,96 +624,96 @@ extern "C" fn prim_query(args: *const ElleValue, nargs: usize) -> ElleResult {
             for triple in triples {
                 let triple = match triple {
                     Ok(t) => t,
-                    Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+                    Err(e) => return a.err(ctx, "sparql-error", &format!("{}: {}", PRIM, e)),
                 };
-                rows.push(a.array(&[
-                    subject_to_elle(&triple.subject),
-                    iri_to_elle(&triple.predicate),
-                    term_to_elle(&triple.object),
+                rows.push(a.array(ctx, &[
+                    subject_to_elle(ctx, &triple.subject),
+                    iri_to_elle(ctx, &triple.predicate),
+                    term_to_elle(ctx, &triple.object),
                     a.nil(),
                 ]));
             }
-            a.ok(a.array(&rows))
+            a.ok(a.array(ctx, &rows))
         }
     }
 }
 
-extern "C" fn prim_update(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_update(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     const PRIM: &str = "oxigraph/update";
-    let store = match get_store(args, nargs, PRIM) {
+    let store = match get_store(ctx, args, nargs, PRIM) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let v1 = unsafe { a.arg(args, nargs, 1) };
     let sparql = match a.get_string(v1) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("{}: expected string sparql-update, got {}", PRIM, a.type_name(v1))),
+        None => return a.err(ctx, "type-error", &format!("{}: expected string sparql-update, got {}", PRIM, a.type_name(v1))),
     };
     let prepared = match SparqlEvaluator::new().parse_update(&sparql) {
         Ok(u) => u,
-        Err(e) => return a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+        Err(e) => return a.err(ctx, "sparql-error", &format!("{}: {}", PRIM, e)),
     };
     match prepared.on_store(store).execute() {
         Ok(()) => a.ok(a.nil()),
-        Err(e) => a.err("sparql-error", &format!("{}: {}", PRIM, e)),
+        Err(e) => a.err(ctx, "sparql-error", &format!("{}: {}", PRIM, e)),
     }
 }
 
 /// Map a keyword value to an `RdfFormat`, or return an error.
-fn keyword_to_format(val: ElleValue, prim: &str) -> Result<RdfFormat, ElleResult> {
+fn keyword_to_format(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<RdfFormat, ElleResult> {
     let a = api();
     let kw = a.get_keyword_name(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected format keyword (:turtle :ntriples :nquads :rdfxml), got {}", prim, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: expected format keyword (:turtle :ntriples :nquads :rdfxml), got {}", prim, a.type_name(val)))
     })?;
     match kw {
         "turtle" => Ok(RdfFormat::Turtle),
         "ntriples" => Ok(RdfFormat::NTriples),
         "nquads" => Ok(RdfFormat::NQuads),
         "rdfxml" => Ok(RdfFormat::RdfXml),
-        _ => Err(a.err("type-error", &format!("{}: unknown format keyword :{}, expected :turtle :ntriples :nquads :rdfxml", prim, kw))),
+        _ => Err(a.err(ctx, "type-error", &format!("{}: unknown format keyword :{}, expected :turtle :ntriples :nquads :rdfxml", prim, kw))),
     }
 }
 
-extern "C" fn prim_load(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_load(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     const PRIM: &str = "oxigraph/load";
-    let store = match get_store(args, nargs, PRIM) {
+    let store = match get_store(ctx, args, nargs, PRIM) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let v1 = unsafe { a.arg(args, nargs, 1) };
     let data = match a.get_string(v1) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("{}: expected string data, got {}", PRIM, a.type_name(v1))),
+        None => return a.err(ctx, "type-error", &format!("{}: expected string data, got {}", PRIM, a.type_name(v1))),
     };
     let v2 = unsafe { a.arg(args, nargs, 2) };
-    let format = match keyword_to_format(v2, PRIM) {
+    let format = match keyword_to_format(ctx, v2, PRIM) {
         Ok(f) => f,
         Err(e) => return e,
     };
     match store.load_from_reader(format, data.as_bytes()) {
         Ok(()) => a.ok(a.nil()),
-        Err(e) => oxigraph_err(PRIM, e),
+        Err(e) => oxigraph_err(ctx, PRIM, e),
     }
 }
 
-extern "C" fn prim_dump(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_dump(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     const PRIM: &str = "oxigraph/dump";
-    let store = match get_store(args, nargs, PRIM) {
+    let store = match get_store(ctx, args, nargs, PRIM) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let format = match keyword_to_format(v1, PRIM) {
+    let format = match keyword_to_format(ctx, v1, PRIM) {
         Ok(f) => f,
         Err(e) => return e,
     };
     let buf: Vec<u8> = if format.supports_datasets() {
         match store.dump_to_writer(RdfSerializer::from_format(format), Vec::new()) {
             Ok(b) => b,
-            Err(e) => return oxigraph_err(PRIM, e),
+            Err(e) => return oxigraph_err(ctx, PRIM, e),
         }
     } else {
         match store.dump_graph_to_writer(
@@ -721,24 +722,24 @@ extern "C" fn prim_dump(args: *const ElleValue, nargs: usize) -> ElleResult {
             Vec::new(),
         ) {
             Ok(b) => b,
-            Err(e) => return oxigraph_err(PRIM, e),
+            Err(e) => return oxigraph_err(ctx, PRIM, e),
         }
     };
     match String::from_utf8(buf) {
-        Ok(s) => a.ok(a.string(&s)),
-        Err(e) => oxigraph_err(PRIM, e),
+        Ok(s) => a.ok(a.string(ctx, &s)),
+        Err(e) => oxigraph_err(ctx, PRIM, e),
     }
 }
 
-extern "C" fn prim_store_flush(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_store_flush(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let store = match get_store(args, nargs, "oxigraph/store-flush") {
+    let store = match get_store(ctx, args, nargs, "oxigraph/store-flush") {
         Ok(s) => s,
         Err(e) => return e,
     };
     match store.flush() {
         Ok(()) => a.ok(a.nil()),
-        Err(e) => oxigraph_err("oxigraph/store-flush", e),
+        Err(e) => oxigraph_err(ctx, "oxigraph/store-flush", e),
     }
 }
 
