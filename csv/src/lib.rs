@@ -1,6 +1,6 @@
 //! Elle CSV plugin — CSV parsing and serialization via the `csv` crate.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("csv/", &PRIMITIVES);
 
@@ -9,12 +9,16 @@ elle_plugin::define_plugin!("csv/", &PRIMITIVES);
 // ---------------------------------------------------------------------------
 
 /// Extract a string from an ElleValue.
-fn extract_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
+///
+/// Takes the per-call `ctx` so any error value it constructs is allocated
+/// into the calling primitive's region (ABI v3).
+fn extract_string(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<String, ElleResult> {
     let a = api();
     if let Some(s) = a.get_string(val) {
         return Ok(s.to_string());
     }
     Err(a.err(
+        ctx,
         "type-error",
         &format!("{}: expected string, got {}", name, a.type_name(val)),
     ))
@@ -22,8 +26,8 @@ fn extract_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
 
 /// Extract the delimiter byte from an opts struct (second argument).
 /// Returns b',' if opts is nil or absent. Returns an error if opts is present
-/// but malformed.
-fn extract_delimiter(opts: ElleValue, name: &str) -> Result<u8, ElleResult> {
+/// but malformed. Threads `ctx` for any error value it allocates.
+fn extract_delimiter(ctx: *mut ElleCtx, opts: ElleValue, name: &str) -> Result<u8, ElleResult> {
     let a = api();
     if a.check_nil(opts) {
         return Ok(b',');
@@ -31,6 +35,7 @@ fn extract_delimiter(opts: ElleValue, name: &str) -> Result<u8, ElleResult> {
     // opts must be a struct
     if !a.check_struct(opts) {
         return Err(a.err(
+            ctx,
             "type-error",
             &format!("{}: opts must be a struct, got {}", name, a.type_name(opts)),
         ));
@@ -45,6 +50,7 @@ fn extract_delimiter(opts: ElleValue, name: &str) -> Result<u8, ElleResult> {
         Some(s) => s.to_string(),
         None => {
             return Err(a.err(
+                ctx,
                 "type-error",
                 &format!(
                     "{}: :delimiter must be a single-character string, got {}",
@@ -57,6 +63,7 @@ fn extract_delimiter(opts: ElleValue, name: &str) -> Result<u8, ElleResult> {
     let b = s.as_bytes();
     if b.len() != 1 {
         return Err(a.err(
+            ctx,
             "csv-error",
             &format!(
                 "{}: :delimiter must be a single-character string, got {:?}",
@@ -68,6 +75,9 @@ fn extract_delimiter(opts: ElleValue, name: &str) -> Result<u8, ElleResult> {
 }
 
 /// Stringify an ElleValue for CSV output.
+///
+/// Produces a Rust `String` only — it allocates no elle values, so it needs
+/// no `ctx`.
 fn value_to_csv_field(val: ElleValue) -> String {
     let a = api();
     if let Some(s) = a.get_string(val) {
@@ -92,16 +102,17 @@ fn value_to_csv_field(val: ElleValue) -> String {
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_csv_parse(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_csv_parse(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "csv/parse";
     if nargs == 0 || nargs > 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("{}: expected 1 or 2 arguments, got {}", name, nargs),
         );
     }
-    let text = match extract_string(unsafe { a.arg(args, nargs, 0) }, name) {
+    let text = match extract_string(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -110,7 +121,7 @@ extern "C" fn prim_csv_parse(args: *const ElleValue, nargs: usize) -> ElleResult
     } else {
         a.nil()
     };
-    let delim = match extract_delimiter(opts, name) {
+    let delim = match extract_delimiter(ctx, opts, name) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -122,7 +133,7 @@ extern "C" fn prim_csv_parse(args: *const ElleValue, nargs: usize) -> ElleResult
     let headers: Vec<String> = match rdr.headers() {
         Ok(rec) => rec.iter().map(|s| s.to_owned()).collect(),
         Err(e) => {
-            return a.err("csv-error", &format!("{}: {}", name, e));
+            return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
         }
     };
 
@@ -131,29 +142,34 @@ extern "C" fn prim_csv_parse(args: *const ElleValue, nargs: usize) -> ElleResult
         let record = match result {
             Ok(r) => r,
             Err(e) => {
-                return a.err("csv-error", &format!("{}: {}", name, e));
+                return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
             }
         };
         let fields: Vec<(&str, ElleValue)> = headers
             .iter()
             .zip(record.iter())
-            .map(|(header, field)| (header.as_str(), a.string(field)))
+            .map(|(header, field)| (header.as_str(), a.string(ctx, field)))
             .collect();
-        rows.push(a.build_struct(&fields));
+        rows.push(a.build_struct(ctx, &fields));
     }
-    a.ok(a.array(&rows))
+    a.ok(a.array(ctx, &rows))
 }
 
-extern "C" fn prim_csv_parse_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_csv_parse_rows(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
     let a = api();
     let name = "csv/parse-rows";
     if nargs == 0 || nargs > 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("{}: expected 1 or 2 arguments, got {}", name, nargs),
         );
     }
-    let text = match extract_string(unsafe { a.arg(args, nargs, 0) }, name) {
+    let text = match extract_string(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -162,7 +178,7 @@ extern "C" fn prim_csv_parse_rows(args: *const ElleValue, nargs: usize) -> ElleR
     } else {
         a.nil()
     };
-    let delim = match extract_delimiter(opts, name) {
+    let delim = match extract_delimiter(ctx, opts, name) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -177,20 +193,21 @@ extern "C" fn prim_csv_parse_rows(args: *const ElleValue, nargs: usize) -> ElleR
         let record = match result {
             Ok(r) => r,
             Err(e) => {
-                return a.err("csv-error", &format!("{}: {}", name, e));
+                return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
             }
         };
-        let fields: Vec<ElleValue> = record.iter().map(|s| a.string(s)).collect();
-        rows.push(a.array(&fields));
+        let fields: Vec<ElleValue> = record.iter().map(|s| a.string(ctx, s)).collect();
+        rows.push(a.array(ctx, &fields));
     }
-    a.ok(a.array(&rows))
+    a.ok(a.array(ctx, &rows))
 }
 
-extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_csv_write(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "csv/write";
     if nargs == 0 || nargs > 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("{}: expected 1 or 2 arguments, got {}", name, nargs),
         );
@@ -202,6 +219,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
         Some(n) => n,
         None => {
             return a.err(
+                ctx,
                 "type-error",
                 &format!("{}: expected array, got {}", name, a.type_name(rows_val)),
             );
@@ -213,7 +231,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
     } else {
         a.nil()
     };
-    let delim = match extract_delimiter(opts, name) {
+    let delim = match extract_delimiter(ctx, opts, name) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -228,6 +246,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
         let first = a.get_array_item(rows_val, 0);
         if !a.check_struct(first) {
             return a.err(
+                ctx,
                 "type-error",
                 &format!(
                     "{}: each row must be a struct, got {}",
@@ -241,7 +260,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
 
         // Write header row
         if let Err(e) = wtr.write_record(&headers) {
-            return a.err("csv-error", &format!("{}: {}", name, e));
+            return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
         }
 
         // Write each row using the same key order
@@ -249,6 +268,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
             let row = a.get_array_item(rows_val, i);
             if !a.check_struct(row) {
                 return a.err(
+                    ctx,
                     "type-error",
                     &format!(
                         "{}: each row must be a struct, got {}",
@@ -262,7 +282,7 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
                 .map(|h| value_to_csv_field(a.get_struct_field(row, h)))
                 .collect();
             if let Err(e) = wtr.write_record(&fields) {
-                return a.err("csv-error", &format!("{}: {}", name, e));
+                return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
             }
         }
     }
@@ -271,17 +291,22 @@ extern "C" fn prim_csv_write(args: *const ElleValue, nargs: usize) -> ElleResult
     let s = match String::from_utf8(out) {
         Ok(s) => s,
         Err(e) => {
-            return a.err("csv-error", &format!("{}: {}", name, e));
+            return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
         }
     };
-    a.ok(a.string(&s))
+    a.ok(a.string(ctx, &s))
 }
 
-extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_csv_write_rows(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
     let a = api();
     let name = "csv/write-rows";
     if nargs == 0 || nargs > 2 {
         return a.err(
+            ctx,
             "arity-error",
             &format!("{}: expected 1 or 2 arguments, got {}", name, nargs),
         );
@@ -293,6 +318,7 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
         Some(n) => n,
         None => {
             return a.err(
+                ctx,
                 "type-error",
                 &format!("{}: expected array, got {}", name, a.type_name(rows_val)),
             );
@@ -304,7 +330,7 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
     } else {
         a.nil()
     };
-    let delim = match extract_delimiter(opts, name) {
+    let delim = match extract_delimiter(ctx, opts, name) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -320,6 +346,7 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
             Some(n) => n,
             None => {
                 return a.err(
+                    ctx,
                     "type-error",
                     &format!(
                         "{}: each row must be an array, got {}",
@@ -333,7 +360,7 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
             .map(|j| value_to_csv_field(a.get_array_item(row, j)))
             .collect();
         if let Err(e) = wtr.write_record(&fields) {
-            return a.err("csv-error", &format!("{}: {}", name, e));
+            return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
         }
     }
 
@@ -342,10 +369,10 @@ extern "C" fn prim_csv_write_rows(args: *const ElleValue, nargs: usize) -> ElleR
     let s = match String::from_utf8(out) {
         Ok(s) => s,
         Err(e) => {
-            return a.err("csv-error", &format!("{}: {}", name, e));
+            return a.err(ctx, "csv-error", &format!("{}: {}", name, e));
         }
     };
-    a.ok(a.string(&s))
+    a.ok(a.string(ctx, &s))
 }
 
 // ---------------------------------------------------------------------------
