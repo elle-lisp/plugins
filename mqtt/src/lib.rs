@@ -3,7 +3,7 @@
 //! State-machine pattern: this plugin handles MQTT packet encode/decode only.
 //! All TCP I/O happens in Elle code via `port/read`/`port/write`.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 use mqttbytes::v4::{self, Packet};
 use mqttbytes::QoS;
 use std::cell::{Cell, RefCell};
@@ -43,6 +43,7 @@ elle_plugin::define_plugin!("mqtt/", &PRIMITIVES);
 // ---------------------------------------------------------------------------
 
 fn get_state<'a>(
+    ctx: *mut ElleCtx,
     args: *const ElleValue,
     nargs: usize,
     idx: usize,
@@ -51,7 +52,7 @@ fn get_state<'a>(
     let a = api();
     let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<MqttState>(val, "mqtt-state").ok_or_else(|| {
-        a.err(
+        a.err(ctx, 
             "type-error",
             &format!(
                 "{}: expected mqtt-state, got {}",
@@ -62,9 +63,9 @@ fn get_state<'a>(
     })
 }
 
-fn mqtt_err(name: &str, msg: impl std::fmt::Display) -> ElleResult {
+fn mqtt_err(ctx: *mut ElleCtx, name: &str, msg: impl std::fmt::Display) -> ElleResult {
     let a = api();
-    a.err("mqtt-error", &format!("{}: {}", name, msg))
+    a.err(ctx, "mqtt-error", &format!("{}: {}", name, msg))
 }
 
 fn qos_from_int(n: i64) -> Option<QoS> {
@@ -131,7 +132,7 @@ fn encode_packet(packet: &Packet) -> Result<Vec<u8>, String> {
 }
 
 /// Convert a parsed MQTT packet to an Elle struct value.
-fn packet_to_value(packet: &Packet) -> ElleValue {
+fn packet_to_value(ctx: *mut ElleCtx, packet: &Packet) -> ElleValue {
     let a = api();
     match packet {
         Packet::ConnAck(p) => {
@@ -143,7 +144,7 @@ fn packet_to_value(packet: &Packet) -> ElleValue {
                 v4::ConnectReturnCode::BadUserNamePassword => 4,
                 v4::ConnectReturnCode::NotAuthorized => 5,
             };
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("type", a.keyword("connack")),
                 ("session-present", a.boolean(p.session_present)),
                 ("code", a.int(code)),
@@ -155,10 +156,10 @@ fn packet_to_value(packet: &Packet) -> ElleValue {
             } else {
                 a.int(p.pkid as i64)
             };
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("type", a.keyword("publish")),
-                ("topic", a.string(p.topic.as_str())),
-                ("payload", a.bytes(&p.payload)),
+                ("topic", a.string(ctx, p.topic.as_str())),
+                ("payload", a.bytes(ctx, &p.payload)),
                 ("qos", a.int(qos_to_int(p.qos))),
                 ("retain", a.boolean(p.retain)),
                 ("packet-id", packet_id),
@@ -173,29 +174,29 @@ fn packet_to_value(packet: &Packet) -> ElleValue {
                     v4::SubscribeReasonCode::Failure => a.int(128),
                 })
                 .collect();
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("type", a.keyword("suback")),
                 ("packet-id", a.int(p.pkid as i64)),
-                ("codes", a.array(&codes)),
+                ("codes", a.array(ctx, &codes)),
             ])
         }
         Packet::UnsubAck(p) => {
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("type", a.keyword("unsuback")),
                 ("packet-id", a.int(p.pkid as i64)),
             ])
         }
         Packet::PubAck(p) => {
-            a.build_struct(&[
+            a.build_struct(ctx, &[
                 ("type", a.keyword("puback")),
                 ("packet-id", a.int(p.pkid as i64)),
             ])
         }
         Packet::PingResp => {
-            a.build_struct(&[("type", a.keyword("pingresp"))])
+            a.build_struct(ctx, &[("type", a.keyword("pingresp"))])
         }
         _ => {
-            a.build_struct(&[("type", a.keyword("unknown"))])
+            a.build_struct(ctx, &[("type", a.keyword("unknown"))])
         }
     }
 }
@@ -210,7 +211,7 @@ fn struct_get_kw(val: ElleValue, key: &str) -> ElleValue {
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_mqtt_state(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_state(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let mut protocol = 4u8;
     let mut keep_alive = 60u16;
@@ -223,7 +224,7 @@ extern "C" fn prim_mqtt_state(args: *const ElleValue, nargs: usize) -> ElleResul
                 if i == 4 || i == 5 {
                     protocol = i as u8;
                 } else {
-                    return mqtt_err("mqtt/state", "protocol must be 4 or 5");
+                    return mqtt_err(ctx, "mqtt/state", "protocol must be 4 or 5");
                 }
             }
             let ka_val = struct_get_kw(arg0, "keep-alive");
@@ -241,20 +242,20 @@ extern "C" fn prim_mqtt_state(args: *const ElleValue, nargs: usize) -> ElleResul
         packets: RefCell::new(VecDeque::new()),
         connected: Cell::new(false),
     };
-    a.ok(a.external("mqtt-state", state))
+    a.ok(a.external(ctx, "mqtt-state", state))
 }
 
-extern "C" fn prim_mqtt_encode_connect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_connect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-connect";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
 
     let opts = unsafe { a.arg(args, nargs, 1) };
     if !a.check_struct(opts) {
-        return a.err("type-error", &format!("{}: expected struct for opts", name));
+        return a.err(ctx, "type-error", &format!("{}: expected struct for opts", name));
     }
 
     let client_id_val = struct_get_kw(opts, "client-id");
@@ -283,15 +284,15 @@ extern "C" fn prim_mqtt_encode_connect(args: *const ElleValue, nargs: usize) -> 
 
     let packet = Packet::Connect(connect);
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_publish(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-publish";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -300,7 +301,7 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
     let topic = match a.get_string(topic_val) {
         Some(s) => s.to_string(),
         None => {
-            return a.err("type-error", &format!("{}: expected string for topic", name));
+            return a.err(ctx, "type-error", &format!("{}: expected string for topic", name));
         }
     };
 
@@ -310,7 +311,7 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
     } else if let Some(s) = a.get_string(payload_val) {
         s.as_bytes().to_vec()
     } else {
-        return a.err(
+        return a.err(ctx, 
             "type-error",
             &format!("{}: expected bytes or string for payload", name),
         );
@@ -326,7 +327,7 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
             if let Some(i) = a.get_int(qos_val) {
                 qos = match qos_from_int(i) {
                     Some(q) => q,
-                    None => return mqtt_err(name, format!("invalid QoS level: {}", i)),
+                    None => return mqtt_err(ctx, name, format!("invalid QoS level: {}", i)),
                 };
             }
             let retain_val = struct_get_kw(opts, "retain");
@@ -351,15 +352,15 @@ extern "C" fn prim_mqtt_encode_publish(args: *const ElleValue, nargs: usize) -> 
 
     let packet = Packet::Publish(publish);
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_encode_subscribe(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_subscribe(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-subscribe";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -369,7 +370,7 @@ extern "C" fn prim_mqtt_encode_subscribe(args: *const ElleValue, nargs: usize) -
     let topics_len = match a.get_array_len(topics_arg) {
         Some(l) => l,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("{}: expected array of [topic qos] pairs", name),
             );
@@ -388,20 +389,20 @@ extern "C" fn prim_mqtt_encode_subscribe(args: *const ElleValue, nargs: usize) -
         let item = a.get_array_item(topics_arg, i);
         let pair_len = match a.get_array_len(item) {
             Some(l) => l,
-            None => return mqtt_err(name, "each topic must be [topic qos]"),
+            None => return mqtt_err(ctx, name, "each topic must be [topic qos]"),
         };
         if pair_len < 2 {
-            return mqtt_err(name, "each topic must be [topic qos]");
+            return mqtt_err(ctx, name, "each topic must be [topic qos]");
         }
         let topic_val = a.get_array_item(item, 0);
         let qos_val = a.get_array_item(item, 1);
         let topic = match a.get_string(topic_val) {
             Some(s) => s.to_string(),
-            None => return mqtt_err(name, "topic must be a string"),
+            None => return mqtt_err(ctx, name, "topic must be a string"),
         };
         let qos = match a.get_int(qos_val).and_then(qos_from_int) {
             Some(q) => q,
-            None => return mqtt_err(name, "qos must be 0, 1, or 2"),
+            None => return mqtt_err(ctx, name, "qos must be 0, 1, or 2"),
         };
         subscribe
             .filters
@@ -410,15 +411,15 @@ extern "C" fn prim_mqtt_encode_subscribe(args: *const ElleValue, nargs: usize) -
 
     let packet = Packet::Subscribe(subscribe);
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_encode_unsubscribe(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_unsubscribe(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-unsubscribe";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -427,7 +428,7 @@ extern "C" fn prim_mqtt_encode_unsubscribe(args: *const ElleValue, nargs: usize)
     let topics_len = match a.get_array_len(topics_arg) {
         Some(l) => l,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("{}: expected array of topic strings", name),
             );
@@ -443,7 +444,7 @@ extern "C" fn prim_mqtt_encode_unsubscribe(args: *const ElleValue, nargs: usize)
         let item = a.get_array_item(topics_arg, i);
         match a.get_string(item) {
             Some(s) => topics.push(s.to_string()),
-            None => return mqtt_err(name, "each topic must be a string"),
+            None => return mqtt_err(ctx, name, "each topic must be a string"),
         }
     }
 
@@ -453,63 +454,63 @@ extern "C" fn prim_mqtt_encode_unsubscribe(args: *const ElleValue, nargs: usize)
 
     let packet = Packet::Unsubscribe(unsub);
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_encode_ping(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_ping(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-ping";
-    let _st = match get_state(args, nargs, 0, name) {
+    let _st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let packet = Packet::PingReq;
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_encode_disconnect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_disconnect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-disconnect";
-    let _st = match get_state(args, nargs, 0, name) {
+    let _st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let packet = Packet::Disconnect;
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_encode_puback(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_encode_puback(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/encode-puback";
-    let _st = match get_state(args, nargs, 0, name) {
+    let _st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let pkid_val = unsafe { a.arg(args, nargs, 1) };
     let pkid = match a.get_int(pkid_val) {
         Some(i) if i > 0 && i <= u16::MAX as i64 => i as u16,
-        _ => return mqtt_err(name, "packet-id must be a positive integer"),
+        _ => return mqtt_err(ctx, name, "packet-id must be a positive integer"),
     };
     let puback = v4::PubAck::new(pkid);
     let packet = Packet::PubAck(puback);
     match encode_packet(&packet) {
-        Ok(data) => a.ok(a.bytes(&data)),
-        Err(e) => mqtt_err(name, e),
+        Ok(data) => a.ok(a.bytes(ctx, &data)),
+        Err(e) => mqtt_err(ctx, name, e),
     }
 }
 
-extern "C" fn prim_mqtt_feed(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_feed(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/feed";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -518,7 +519,7 @@ extern "C" fn prim_mqtt_feed(args: *const ElleValue, nargs: usize) -> ElleResult
     let new_data: Vec<u8> = if let Some(b) = a.get_bytes(data_val) {
         b.to_vec()
     } else {
-        return a.err(
+        return a.err(ctx, 
             "type-error",
             &format!("{}: expected bytes, got {}", name, a.type_name(data_val)),
         );
@@ -541,43 +542,43 @@ extern "C" fn prim_mqtt_feed(args: *const ElleValue, nargs: usize) -> ElleResult
                 packets.push_back(packet);
             }
             Err(mqttbytes::Error::InsufficientBytes(_)) => break,
-            Err(e) => return mqtt_err(name, e),
+            Err(e) => return mqtt_err(ctx, name, e),
         }
     }
 
     a.ok(a.int(packets.len() as i64))
 }
 
-extern "C" fn prim_mqtt_poll(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_poll(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/poll";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let mut packets = st.packets.borrow_mut();
     match packets.pop_front() {
-        Some(packet) => a.ok(packet_to_value(&packet)),
+        Some(packet) => a.ok(packet_to_value(ctx, &packet)),
         None => a.ok(a.nil()),
     }
 }
 
-extern "C" fn prim_mqtt_poll_all(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_poll_all(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/poll-all";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     let mut packets = st.packets.borrow_mut();
-    let vals: Vec<ElleValue> = packets.drain(..).map(|p| packet_to_value(&p)).collect();
-    a.ok(a.array(&vals))
+    let vals: Vec<ElleValue> = packets.drain(..).map(|p| packet_to_value(ctx, &p)).collect();
+    a.ok(a.array(ctx, &vals))
 }
 
-extern "C" fn prim_mqtt_next_packet_id(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_next_packet_id(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/next-packet-id";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -587,20 +588,20 @@ extern "C" fn prim_mqtt_next_packet_id(args: *const ElleValue, nargs: usize) -> 
     a.ok(a.int(id as i64))
 }
 
-extern "C" fn prim_mqtt_connected(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_connected(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/connected?";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
     a.ok(a.boolean(st.connected.get()))
 }
 
-extern "C" fn prim_mqtt_keep_alive(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_mqtt_keep_alive(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "mqtt/keep-alive";
-    let st = match get_state(args, nargs, 0, name) {
+    let st = match get_state(ctx, args, nargs, 0, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
