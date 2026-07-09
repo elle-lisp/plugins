@@ -1,7 +1,7 @@
 //! Elle jiff plugin — date/time support via the `jiff` crate.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
 
 pub mod access;
 pub mod arith;
@@ -47,10 +47,10 @@ impl JiffValue {
 // Construction helpers
 // ---------------------------------------------------------------------------
 
-pub fn jiff_val(v: JiffValue) -> ElleValue {
+pub fn jiff_val(ctx: *mut ElleCtx, v: JiffValue) -> ElleValue {
     let a = api();
     let name = v.type_name();
-    a.external(name, v)
+    a.external(ctx, name, v)
 }
 
 pub fn as_jiff(v: ElleValue) -> Option<&'static JiffValue> {
@@ -65,22 +65,24 @@ pub fn as_jiff(v: ElleValue) -> Option<&'static JiffValue> {
         .or_else(|| a.get_external::<JiffValue>(v, "signed-duration"))
 }
 
-pub fn require_jiff(v: ElleValue, fn_name: &str) -> Result<&'static JiffValue, ElleResult> {
+pub fn require_jiff(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<&'static JiffValue, ElleResult> {
     let a = api();
     as_jiff(v).ok_or_else(|| {
-        a.err("type-error", &format!("{}: expected temporal value, got {}", fn_name, a.type_name(v)))
+        a.err(ctx, "type-error", &format!("{}: expected temporal value, got {}", fn_name, a.type_name(v)))
     })
 }
 
 macro_rules! require_variant {
-    ($val:expr, $variant:ident, $fn_name:expr, $expected:expr) => {
+    ($ctx:expr, $val:expr, $variant:ident, $fn_name:expr, $expected:expr) => {
         match crate::as_jiff($val) {
             Some(crate::JiffValue::$variant(inner)) => Ok(inner),
             Some(other) => Err(crate::api().err(
+                $ctx,
                 "type-error",
                 &format!("{}: expected {}, got {}", $fn_name, $expected, other.type_name()),
             )),
             None => Err(crate::api().err(
+                $ctx,
                 "type-error",
                 &format!("{}: expected {}, got {}", $fn_name, $expected, crate::api().type_name($val)),
             )),
@@ -89,35 +91,35 @@ macro_rules! require_variant {
 }
 pub(crate) use require_variant;
 
-pub fn require_string(v: ElleValue, fn_name: &str) -> Result<String, ElleResult> {
+pub fn require_string(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<String, ElleResult> {
     let a = api();
     a.get_string(v)
         .map(|s| s.to_string())
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected string, got {}", fn_name, a.type_name(v))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected string, got {}", fn_name, a.type_name(v))))
 }
 
-pub fn require_int(v: ElleValue, fn_name: &str) -> Result<i64, ElleResult> {
+pub fn require_int(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<i64, ElleResult> {
     let a = api();
     a.get_int(v)
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected int, got {}", fn_name, a.type_name(v))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected int, got {}", fn_name, a.type_name(v))))
 }
 
-pub fn require_float(v: ElleValue, fn_name: &str) -> Result<f64, ElleResult> {
+pub fn require_float(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<f64, ElleResult> {
     let a = api();
     a.get_float(v)
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected float, got {}", fn_name, a.type_name(v))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected float, got {}", fn_name, a.type_name(v))))
 }
 
-pub fn require_keyword(v: ElleValue, fn_name: &str) -> Result<String, ElleResult> {
+pub fn require_keyword(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<String, ElleResult> {
     let a = api();
     a.get_keyword_name(v)
         .map(|s| s.to_string())
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected keyword, got {}", fn_name, a.type_name(v))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected keyword, got {}", fn_name, a.type_name(v))))
 }
 
-pub fn jiff_err(fn_name: &str, e: impl std::fmt::Display) -> ElleResult {
+pub fn jiff_err(ctx: *mut ElleCtx, fn_name: &str, e: impl std::fmt::Display) -> ElleResult {
     let a = api();
-    a.err("jiff-error", &format!("{}: {}", fn_name, e))
+    a.err(ctx, "jiff-error", &format!("{}: {}", fn_name, e))
 }
 
 pub fn struct_get_kw(v: ElleValue, key: &str) -> Option<ElleValue> {
