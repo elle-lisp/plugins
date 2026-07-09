@@ -1,6 +1,6 @@
 //! UiNode tree, Elle<->Rust conversion, egui rendering, and interaction tracking.
 
-use elle_plugin::{ElleResult, ElleValue};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue};
 use std::collections::{HashMap, HashSet};
 
 use crate::api;
@@ -182,16 +182,16 @@ pub fn value_to_node(val: ElleValue) -> Result<UiNode, String> {
     }
 }
 
-pub fn value_to_tree(val: ElleValue) -> Result<Vec<UiNode>, ElleResult> {
+pub fn value_to_tree(ctx: *mut ElleCtx, val: ElleValue) -> Result<Vec<UiNode>, ElleResult> {
     let a = api();
     if let Some(len) = a.get_array_len(val) {
         if len > 0 && a.check_keyword(a.get_array_item(val, 0)) {
-            let node = value_to_node(val).map_err(|e| a.err("ui-error", &e))?;
+            let node = value_to_node(val).map_err(|e| a.err(ctx, "ui-error", &e))?;
             return Ok(vec![node]);
         }
-        (0..len).map(|i| value_to_node(a.get_array_item(val, i)).map_err(|e| a.err("ui-error", &e))).collect()
+        (0..len).map(|i| value_to_node(a.get_array_item(val, i)).map_err(|e| a.err(ctx, "ui-error", &e))).collect()
     } else {
-        Err(a.err("type-error", "egui/frame: tree must be an array"))
+        Err(a.err(ctx, "type-error", "egui/frame: tree must be an array"))
     }
 }
 
@@ -282,26 +282,26 @@ fn render_node(ui: &mut egui::Ui, node: &UiNode, state: &mut WidgetState, ix: &m
 
 // ── Interactions -> Value ─────────────────────────────────────────────
 
-pub fn interactions_to_value(ix: &Interactions) -> ElleValue {
+pub fn interactions_to_value(ctx: *mut ElleCtx, ix: &Interactions) -> ElleValue {
     let a = api();
 
     let clicks: Vec<ElleValue> = ix.clicked.iter().map(|s| a.keyword(s)).collect();
-    let clicks_set = a.set(&clicks);
+    let clicks_set = a.set(ctx, &clicks);
 
-    let text_fields: Vec<(&str, ElleValue)> = ix.text_values.iter().map(|(k, v)| (k.as_str(), a.string(v))).collect();
+    let text_fields: Vec<(&str, ElleValue)> = ix.text_values.iter().map(|(k, v)| (k.as_str(), a.string(ctx, v))).collect();
     let check_fields: Vec<(&str, ElleValue)> = ix.check_values.iter().map(|(k, v)| (k.as_str(), a.boolean(*v))).collect();
     let slider_fields: Vec<(&str, ElleValue)> = ix.slider_values.iter().map(|(k, v)| (k.as_str(), a.float(*v))).collect();
-    let combo_fields: Vec<(&str, ElleValue)> = ix.combo_values.iter().map(|(k, v)| (k.as_str(), a.string(v))).collect();
+    let combo_fields: Vec<(&str, ElleValue)> = ix.combo_values.iter().map(|(k, v)| (k.as_str(), a.string(ctx, v))).collect();
     let collapsed_fields: Vec<(&str, ElleValue)> = ix.collapsed.iter().map(|(k, v)| (k.as_str(), a.boolean(*v))).collect();
 
-    a.build_struct(&[
+    a.build_struct(ctx, &[
         ("clicks", clicks_set),
-        ("text", a.build_struct(&text_fields)),
-        ("checks", a.build_struct(&check_fields)),
-        ("sliders", a.build_struct(&slider_fields)),
-        ("combos", a.build_struct(&combo_fields)),
-        ("collapsed", a.build_struct(&collapsed_fields)),
+        ("text", a.build_struct(ctx, &text_fields)),
+        ("checks", a.build_struct(ctx, &check_fields)),
+        ("sliders", a.build_struct(ctx, &slider_fields)),
+        ("combos", a.build_struct(ctx, &combo_fields)),
+        ("collapsed", a.build_struct(ctx, &collapsed_fields)),
         ("closed", a.boolean(ix.closed)),
-        ("size", a.array(&[a.int(ix.width as i64), a.int(ix.height as i64)])),
+        ("size", a.array(ctx, &[a.int(ix.width as i64), a.int(ix.height as i64)])),
     ])
 }

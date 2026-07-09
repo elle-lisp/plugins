@@ -6,7 +6,7 @@
 mod ui;
 mod window;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 use std::cell::RefCell;
 
 use crate::ui::Interactions;
@@ -16,20 +16,20 @@ elle_plugin::define_plugin!("egui/", &PRIMITIVES);
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn get_state<'a>(val: ElleValue) -> Result<&'a RefCell<WindowState>, ElleResult> {
+fn get_state<'a>(ctx: *mut ElleCtx, val: ElleValue) -> Result<&'a RefCell<WindowState>, ElleResult> {
     let a = api();
     a.get_external::<RefCell<WindowState>>(val, "egui-window").ok_or_else(|| {
-        a.err("type-error", &format!("expected egui-window handle, got {}", a.type_name(val)))
+        a.err(ctx, "type-error", &format!("expected egui-window handle, got {}", a.type_name(val)))
     })
 }
 
-fn egui_err(name: &str, msg: impl std::fmt::Display) -> ElleResult {
-    api().err("egui-error", &format!("{}: {}", name, msg))
+fn egui_err(ctx: *mut ElleCtx, name: &str, msg: impl std::fmt::Display) -> ElleResult {
+    api().err(ctx, "egui-error", &format!("{}: {}", name, msg))
 }
 
 // ── Primitives ───────────────────────────────────────────────────────
 
-extern "C" fn prim_open(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_open(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let mut title = "Elle".to_string();
     let mut width = 800.0;
@@ -48,35 +48,35 @@ extern "C" fn prim_open(args: *const ElleValue, nargs: usize) -> ElleResult {
     }
 
     match WindowState::new(&title, width, height) {
-        Ok(state) => a.ok(a.external("egui-window", RefCell::new(state))),
-        Err(e) => egui_err("egui/open", e),
+        Ok(state) => a.ok(a.external(ctx, "egui-window", RefCell::new(state))),
+        Err(e) => egui_err(ctx, "egui/open", e),
     }
 }
 
-extern "C" fn prim_display_fd(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_display_fd(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     match state.borrow().display_fd {
         Some(fd) => a.ok(a.int(fd as i64)),
         None => a.ok(a.nil()),
     }
 }
 
-extern "C" fn prim_frame(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_frame(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let tree_val = unsafe { a.arg(args, nargs, 1) };
-    let nodes = match ui::value_to_tree(tree_val) { Ok(n) => n, Err(e) => return e };
+    let nodes = match ui::value_to_tree(ctx, tree_val) { Ok(n) => n, Err(e) => return e };
     let mut state = state.borrow_mut();
     state.pump_events();
     let mut ix = Interactions::default();
     state.frame_with_tree(&nodes, &mut ix);
-    a.ok(ui::interactions_to_value(&ix))
+    a.ok(ui::interactions_to_value(ctx, &ix))
 }
 
-extern "C" fn prim_close(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_close(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let mut state = state.borrow_mut();
     state.close_requested = true;
     state.painter = None;
@@ -89,65 +89,65 @@ extern "C" fn prim_close(args: *const ElleValue, nargs: usize) -> ElleResult {
     a.ok(a.nil())
 }
 
-extern "C" fn prim_open_p(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_open_p(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let state = state.borrow();
     a.ok(a.boolean(!state.close_requested && state.window.is_some()))
 }
 
-extern "C" fn prim_set_text(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_set_text(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err("egui/set-text", format!("id must be a keyword, got {}", a.type_name(v1))) };
+    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-text", format!("id must be a keyword, got {}", a.type_name(v1))) };
     let v2 = unsafe { a.arg(args, nargs, 2) };
-    let val = match a.get_string(v2) { Some(s) => s.to_string(), None => return egui_err("egui/set-text", format!("value must be a string, got {}", a.type_name(v2))) };
+    let val = match a.get_string(v2) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-text", format!("value must be a string, got {}", a.type_name(v2))) };
     state.borrow_mut().widget_state.text_buffers.insert(id, val);
     a.ok(a.nil())
 }
 
-extern "C" fn prim_set_check(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_set_check(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err("egui/set-check", "id must be a keyword") };
+    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-check", "id must be a keyword") };
     let v2 = unsafe { a.arg(args, nargs, 2) };
-    let val = match a.get_bool(v2) { Some(b) => b, None => return egui_err("egui/set-check", "value must be a boolean") };
+    let val = match a.get_bool(v2) { Some(b) => b, None => return egui_err(ctx, "egui/set-check", "value must be a boolean") };
     state.borrow_mut().widget_state.check_states.insert(id, val);
     a.ok(a.nil())
 }
 
-extern "C" fn prim_set_slider(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_set_slider(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err("egui/set-slider", "id must be a keyword") };
+    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-slider", "id must be a keyword") };
     let v2 = unsafe { a.arg(args, nargs, 2) };
     let val = a.get_float(v2).or_else(|| a.get_int(v2).map(|i| i as f64));
     match val {
         Some(v) => { state.borrow_mut().widget_state.slider_states.insert(id, v); a.ok(a.nil()) }
-        None => egui_err("egui/set-slider", "value must be a number"),
+        None => egui_err(ctx, "egui/set-slider", "value must be a number"),
     }
 }
 
-extern "C" fn prim_set_title(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_set_title(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let title = match a.get_string(v1) { Some(s) => s.to_string(), None => return egui_err("egui/set-title", "title must be a string") };
+    let title = match a.get_string(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-title", "title must be a string") };
     let state = state.borrow();
     if let Some(ref window) = state.window { window.set_title(&title); }
     a.ok(a.nil())
 }
 
-extern "C" fn prim_set_combo(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_set_combo(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let state = match get_state(unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
+    let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err("egui/set-combo", "id must be a keyword") };
+    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-combo", "id must be a keyword") };
     let v2 = unsafe { a.arg(args, nargs, 2) };
-    let val = match a.get_string(v2) { Some(s) => s.to_string(), None => return egui_err("egui/set-combo", "value must be a string") };
+    let val = match a.get_string(v2) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-combo", "value must be a string") };
     state.borrow_mut().widget_state.combo_states.insert(id, val);
     a.ok(a.nil())
 }
