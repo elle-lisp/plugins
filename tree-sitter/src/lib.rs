@@ -3,7 +3,7 @@
 //! Provides a query-first API for parsing and inspecting syntax trees.
 //! Bundled grammars: C, Rust. (Elle grammar: future work.)
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
 use std::rc::Rc;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
@@ -71,54 +71,54 @@ fn compute_path(node: Node<'_>) -> Vec<usize> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn get_string(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<String, ElleResult> {
+fn get_string(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<String, ElleResult> {
     let a = api();
     let val = unsafe { a.arg(args, nargs, idx) };
     a.get_string(val)
         .map(|s| s.to_string())
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected string, got {}", prim, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected string, got {}", prim, a.type_name(val))))
 }
 
-fn get_tree(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<Rc<TsTreeData>, ElleResult> {
+fn get_tree(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<Rc<TsTreeData>, ElleResult> {
     let a = api();
     let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<Rc<TsTreeData>>(val, "ts/tree")
         .cloned()
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/tree, got {}", prim, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected ts/tree, got {}", prim, a.type_name(val))))
 }
 
-fn get_node<'a>(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<&'a TsNodeData, ElleResult> {
+fn get_node<'a>(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<&'a TsNodeData, ElleResult> {
     let a = api();
     let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<TsNodeData>(val, "ts/node")
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/node, got {}", prim, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected ts/node, got {}", prim, a.type_name(val))))
 }
 
-fn get_query<'a>(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<&'a TsQueryData, ElleResult> {
+fn get_query<'a>(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<&'a TsQueryData, ElleResult> {
     let a = api();
     let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<TsQueryData>(val, "ts/query")
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/query, got {}", prim, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected ts/query, got {}", prim, a.type_name(val))))
 }
 
-fn get_language(args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<Language, ElleResult> {
+fn get_language(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize, idx: usize, prim: &str) -> Result<Language, ElleResult> {
     let a = api();
     let val = unsafe { a.arg(args, nargs, idx) };
     a.get_external::<Language>(val, "ts/language")
         .cloned()
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected ts/language, got {}", prim, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected ts/language, got {}", prim, a.type_name(val))))
 }
 
-fn node_to_value(node: Node<'_>, tree_data: Rc<TsTreeData>) -> ElleValue {
+fn node_to_value(ctx: *mut ElleCtx, node: Node<'_>, tree_data: Rc<TsTreeData>) -> ElleValue {
     let a = api();
-    a.external("ts/node", TsNodeData::from_node(node, tree_data))
+    a.external(ctx, "ts/node", TsNodeData::from_node(node, tree_data))
 }
 
-fn range_to_value(node: &Node<'_>) -> ElleValue {
+fn range_to_value(ctx: *mut ElleCtx, node: &Node<'_>) -> ElleValue {
     let a = api();
     let start = node.start_position();
     let end = node.end_position();
-    a.build_struct(&[
+    a.build_struct(ctx, &[
         ("start-row", a.int(start.row as i64)),
         ("start-col", a.int(start.column as i64)),
         ("end-row", a.int(end.row as i64)),
@@ -132,9 +132,9 @@ fn range_to_value(node: &Node<'_>) -> ElleValue {
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_ts_language(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_language(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let name = match get_string(args, nargs, 0, "ts/language") {
+    let name = match get_string(ctx, args, nargs, 0, "ts/language") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -142,38 +142,38 @@ extern "C" fn prim_ts_language(args: *const ElleValue, nargs: usize) -> ElleResu
         "c" => tree_sitter_c::LANGUAGE.into(),
         "rust" => tree_sitter_rust::LANGUAGE.into(),
         other => {
-            return a.err("value-error", &format!("ts/language: unknown language {:?}", other));
+            return a.err(ctx, "value-error", &format!("ts/language: unknown language {:?}", other));
         }
     };
-    a.ok(a.external("ts/language", lang))
+    a.ok(a.external(ctx, "ts/language", lang))
 }
 
-extern "C" fn prim_ts_parse(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_parse(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let source = match get_string(args, nargs, 0, "ts/parse") {
+    let source = match get_string(ctx, args, nargs, 0, "ts/parse") {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let lang = match get_language(args, nargs, 1, "ts/parse") {
+    let lang = match get_language(ctx, args, nargs, 1, "ts/parse") {
         Ok(l) => l,
         Err(e) => return e,
     };
     let mut parser = Parser::new();
     if let Err(e) = parser.set_language(&lang) {
-        return a.err("parse-error", &format!("ts/parse: {}", e));
+        return a.err(ctx, "parse-error", &format!("ts/parse: {}", e));
     }
     match parser.parse(&source, None) {
         Some(tree) => {
             let data = Rc::new(TsTreeData { tree, source });
-            a.ok(a.external("ts/tree", data))
+            a.ok(a.external(ctx, "ts/tree", data))
         }
-        None => a.err("parse-error", "ts/parse: parsing failed"),
+        None => a.err(ctx, "parse-error", "ts/parse: parsing failed"),
     }
 }
 
-extern "C" fn prim_ts_root(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_root(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let tree_rc = match get_tree(args, nargs, 0, "ts/root") {
+    let tree_rc = match get_tree(ctx, args, nargs, 0, "ts/root") {
         Ok(t) => t,
         Err(e) => return e,
     };
@@ -183,51 +183,51 @@ extern "C" fn prim_ts_root(args: *const ElleValue, nargs: usize) -> ElleResult {
         tree_data: tree_rc,
         path,
     };
-    a.ok(a.external("ts/node", nd))
+    a.ok(a.external(ctx, "ts/node", nd))
 }
 
-extern "C" fn prim_ts_node_type(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_node_type(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/node-type") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/node-type") {
         Ok(n) => n,
         Err(e) => return e,
     };
     match nd.resolve() {
-        Some(node) => a.ok(a.string(node.kind())),
-        None => a.err("node-error", "ts/node-type: could not resolve node"),
+        Some(node) => a.ok(a.string(ctx, node.kind())),
+        None => a.err(ctx, "node-error", "ts/node-type: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_node_text(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_node_text(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/node-text") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/node-text") {
         Ok(n) => n,
         Err(e) => return e,
     };
     match nd.resolve() {
         Some(node) => {
             let text = &nd.tree_data.source[node.start_byte()..node.end_byte()];
-            a.ok(a.string(text))
+            a.ok(a.string(ctx, text))
         }
-        None => a.err("node-error", "ts/node-text: could not resolve node"),
+        None => a.err(ctx, "node-error", "ts/node-text: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_node_named(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_node_named(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/node-named?") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/node-named?") {
         Ok(n) => n,
         Err(e) => return e,
     };
     match nd.resolve() {
         Some(node) => a.ok(a.boolean(node.is_named())),
-        None => a.err("node-error", "ts/node-named?: could not resolve node"),
+        None => a.err(ctx, "node-error", "ts/node-named?: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_children(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_children(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/children") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/children") {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -236,17 +236,17 @@ extern "C" fn prim_ts_children(args: *const ElleValue, nargs: usize) -> ElleResu
             let tree_data = nd.tree_data.clone();
             let children: Vec<ElleValue> = (0..node.child_count())
                 .filter_map(|i| node.child(i))
-                .map(|child| node_to_value(child, tree_data.clone()))
+                .map(|child| node_to_value(ctx, child, tree_data.clone()))
                 .collect();
-            a.ok(a.array(&children))
+            a.ok(a.array(ctx, &children))
         }
-        None => a.err("node-error", "ts/children: could not resolve node"),
+        None => a.err(ctx, "node-error", "ts/children: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_named_children(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_named_children(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/named-children") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/named-children") {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -255,36 +255,36 @@ extern "C" fn prim_ts_named_children(args: *const ElleValue, nargs: usize) -> El
             let tree_data = nd.tree_data.clone();
             let children: Vec<ElleValue> = (0..node.named_child_count())
                 .filter_map(|i| node.named_child(i))
-                .map(|child| node_to_value(child, tree_data.clone()))
+                .map(|child| node_to_value(ctx, child, tree_data.clone()))
                 .collect();
-            a.ok(a.array(&children))
+            a.ok(a.array(ctx, &children))
         }
-        None => a.err("node-error", "ts/named-children: could not resolve node"),
+        None => a.err(ctx, "node-error", "ts/named-children: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_child_by_field(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_child_by_field(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/child-by-field") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/child-by-field") {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let field = match get_string(args, nargs, 1, "ts/child-by-field") {
+    let field = match get_string(ctx, args, nargs, 1, "ts/child-by-field") {
         Ok(s) => s,
         Err(e) => return e,
     };
     match nd.resolve() {
         Some(node) => match node.child_by_field_name(&field) {
-            Some(child) => a.ok(node_to_value(child, nd.tree_data.clone())),
+            Some(child) => a.ok(node_to_value(ctx, child, nd.tree_data.clone())),
             None => a.ok(a.nil()),
         },
-        None => a.err("node-error", "ts/child-by-field: could not resolve node"),
+        None => a.err(ctx, "node-error", "ts/child-by-field: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_parent(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_parent(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/parent") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/parent") {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -295,65 +295,65 @@ extern "C" fn prim_ts_parent(args: *const ElleValue, nargs: usize) -> ElleResult
         tree_data: nd.tree_data.clone(),
         path: nd.path[..nd.path.len() - 1].to_vec(),
     };
-    a.ok(a.external("ts/node", parent))
+    a.ok(a.external(ctx, "ts/node", parent))
 }
 
-extern "C" fn prim_ts_node_range(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_node_range(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/node-range") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/node-range") {
         Ok(n) => n,
         Err(e) => return e,
     };
     match nd.resolve() {
-        Some(node) => a.ok(range_to_value(&node)),
-        None => a.err("node-error", "ts/node-range: could not resolve node"),
+        Some(node) => a.ok(range_to_value(ctx, &node)),
+        None => a.err(ctx, "node-error", "ts/node-range: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_node_sexp(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_node_sexp(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let nd = match get_node(args, nargs, 0, "ts/node-sexp") {
+    let nd = match get_node(ctx, args, nargs, 0, "ts/node-sexp") {
         Ok(n) => n,
         Err(e) => return e,
     };
     match nd.resolve() {
         Some(node) => {
             let sexp = node.to_sexp();
-            a.ok(a.string(&sexp))
+            a.ok(a.string(ctx, &sexp))
         }
-        None => a.err("node-error", "ts/node-sexp: could not resolve node"),
+        None => a.err(ctx, "node-error", "ts/node-sexp: could not resolve node"),
     }
 }
 
-extern "C" fn prim_ts_query(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_query(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let lang = match get_language(args, nargs, 0, "ts/query") {
+    let lang = match get_language(ctx, args, nargs, 0, "ts/query") {
         Ok(l) => l,
         Err(e) => return e,
     };
-    let pattern = match get_string(args, nargs, 1, "ts/query") {
+    let pattern = match get_string(ctx, args, nargs, 1, "ts/query") {
         Ok(s) => s,
         Err(e) => return e,
     };
     match Query::new(&lang, &pattern) {
-        Ok(query) => a.ok(a.external("ts/query", TsQueryData { query })),
-        Err(e) => a.err("query-error", &format!("ts/query: {}", e)),
+        Ok(query) => a.ok(a.external(ctx, "ts/query", TsQueryData { query })),
+        Err(e) => a.err(ctx, "query-error", &format!("ts/query: {}", e)),
     }
 }
 
-extern "C" fn prim_ts_matches(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_matches(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let qd = match get_query(args, nargs, 0, "ts/matches") {
+    let qd = match get_query(ctx, args, nargs, 0, "ts/matches") {
         Ok(q) => q,
         Err(e) => return e,
     };
-    let nd = match get_node(args, nargs, 1, "ts/matches") {
+    let nd = match get_node(ctx, args, nargs, 1, "ts/matches") {
         Ok(n) => n,
         Err(e) => return e,
     };
     let node = match nd.resolve() {
         Some(n) => n,
-        None => return a.err("node-error", "ts/matches: could not resolve node"),
+        None => return a.err(ctx, "node-error", "ts/matches: could not resolve node"),
     };
 
     let capture_names = qd.query.capture_names();
@@ -367,33 +367,33 @@ extern "C" fn prim_ts_matches(args: *const ElleValue, nargs: usize) -> ElleResul
         let mut cap_kvs: Vec<(String, ElleValue)> = Vec::new();
         for cap in m.captures {
             let name = &capture_names[cap.index as usize];
-            cap_kvs.push(((*name).to_string(), node_to_value(cap.node, tree_data.clone())));
+            cap_kvs.push(((*name).to_string(), node_to_value(ctx, cap.node, tree_data.clone())));
         }
         let cap_refs: Vec<(&str, ElleValue)> = cap_kvs.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-        let captures = a.build_struct(&cap_refs);
-        let match_val = a.build_struct(&[
+        let captures = a.build_struct(ctx, &cap_refs);
+        let match_val = a.build_struct(ctx, &[
             ("pattern", a.int(m.pattern_index as i64)),
             ("captures", captures),
         ]);
         results.push(match_val);
     }
 
-    a.ok(a.array(&results))
+    a.ok(a.array(ctx, &results))
 }
 
-extern "C" fn prim_ts_captures(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_captures(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let qd = match get_query(args, nargs, 0, "ts/captures") {
+    let qd = match get_query(ctx, args, nargs, 0, "ts/captures") {
         Ok(q) => q,
         Err(e) => return e,
     };
-    let nd = match get_node(args, nargs, 1, "ts/captures") {
+    let nd = match get_node(ctx, args, nargs, 1, "ts/captures") {
         Ok(n) => n,
         Err(e) => return e,
     };
     let node = match nd.resolve() {
         Some(n) => n,
-        None => return a.err("node-error", "ts/captures: could not resolve node"),
+        None => return a.err(ctx, "node-error", "ts/captures: could not resolve node"),
     };
 
     let capture_names = qd.query.capture_names();
@@ -406,20 +406,20 @@ extern "C" fn prim_ts_captures(args: *const ElleValue, nargs: usize) -> ElleResu
     while let Some((m, _capture_idx)) = iter.next() {
         for cap in m.captures {
             let name = &capture_names[cap.index as usize];
-            let entry = a.build_struct(&[
-                ("name", a.string(name)),
-                ("node", node_to_value(cap.node, tree_data.clone())),
+            let entry = a.build_struct(ctx, &[
+                ("name", a.string(ctx, name)),
+                ("node", node_to_value(ctx, cap.node, tree_data.clone())),
             ]);
             results.push(entry);
         }
     }
 
-    a.ok(a.array(&results))
+    a.ok(a.array(ctx, &results))
 }
 
-extern "C" fn prim_ts_node_count(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_ts_node_count(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let tree_rc = match get_tree(args, nargs, 0, "ts/node-count") {
+    let tree_rc = match get_tree(ctx, args, nargs, 0, "ts/node-count") {
         Ok(t) => t,
         Err(e) => return e,
     };
