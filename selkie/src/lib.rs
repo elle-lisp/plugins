@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("selkie/", &PRIMITIVES);
 
@@ -10,10 +10,10 @@ elle_plugin::define_plugin!("selkie/", &PRIMITIVES);
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_selkie_render(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_selkie_render(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             &format!("selkie/render: expected 1 argument, got {}", nargs),
         );
@@ -21,7 +21,7 @@ extern "C" fn prim_selkie_render(args: *const ElleValue, nargs: usize) -> ElleRe
     let diagram = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "selkie/render: expected string, got {}",
@@ -33,19 +33,19 @@ extern "C" fn prim_selkie_render(args: *const ElleValue, nargs: usize) -> ElleRe
     let parsed = match selkie::parse(&diagram) {
         Ok(d) => d,
         Err(e) => {
-            return a.err("selkie-error", &format!("selkie/render: parse: {}", e));
+            return a.err(ctx, "selkie-error", &format!("selkie/render: parse: {}", e));
         }
     };
     match selkie::render(&parsed) {
-        Ok(svg) => a.ok(a.string(&svg)),
-        Err(e) => a.err("selkie-error", &format!("selkie/render: render: {}", e)),
+        Ok(svg) => a.ok(a.string(ctx, &svg)),
+        Err(e) => a.err(ctx, "selkie-error", &format!("selkie/render: render: {}", e)),
     }
 }
 
-extern "C" fn prim_selkie_render_to_file(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_selkie_render_to_file(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 2 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             &format!(
                 "selkie/render-to-file: expected 2 arguments, got {}",
@@ -56,7 +56,7 @@ extern "C" fn prim_selkie_render_to_file(args: *const ElleValue, nargs: usize) -
     let diagram = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "selkie/render-to-file: expected string, got {}",
@@ -68,7 +68,7 @@ extern "C" fn prim_selkie_render_to_file(args: *const ElleValue, nargs: usize) -
     let path = match a.get_string(unsafe { a.arg(args, nargs, 1) }) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "selkie/render-to-file: expected string, got {}",
@@ -80,7 +80,7 @@ extern "C" fn prim_selkie_render_to_file(args: *const ElleValue, nargs: usize) -
     let parsed = match selkie::parse(&diagram) {
         Ok(d) => d,
         Err(e) => {
-            return a.err(
+            return a.err(ctx, 
                 "selkie-error",
                 &format!("selkie/render-to-file: parse: {}", e),
             );
@@ -89,22 +89,22 @@ extern "C" fn prim_selkie_render_to_file(args: *const ElleValue, nargs: usize) -
     let svg = match selkie::render(&parsed) {
         Ok(svg) => svg,
         Err(e) => {
-            return a.err(
+            return a.err(ctx, 
                 "selkie-error",
                 &format!("selkie/render-to-file: render: {}", e),
             );
         }
     };
     match fs::write(&path, &*svg) {
-        Ok(()) => a.ok(a.string(&path)),
-        Err(e) => a.err("io-error", &format!("selkie/render-to-file: {}", e)),
+        Ok(()) => a.ok(a.string(ctx, &path)),
+        Err(e) => a.err(ctx, "io-error", &format!("selkie/render-to-file: {}", e)),
     }
 }
 
-extern "C" fn prim_selkie_render_ascii(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_selkie_render_ascii(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     if nargs != 1 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             &format!(
                 "selkie/render-ascii: expected 1 argument, got {}",
@@ -115,7 +115,7 @@ extern "C" fn prim_selkie_render_ascii(args: *const ElleValue, nargs: usize) -> 
     let diagram = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "selkie/render-ascii: expected string, got {}",
@@ -127,15 +127,15 @@ extern "C" fn prim_selkie_render_ascii(args: *const ElleValue, nargs: usize) -> 
     let parsed = match selkie::parse(&diagram) {
         Ok(d) => d,
         Err(e) => {
-            return a.err(
+            return a.err(ctx, 
                 "selkie-error",
                 &format!("selkie/render-ascii: parse: {}", e),
             );
         }
     };
     match selkie::render_ascii(&parsed) {
-        Ok(ascii) => a.ok(a.string(&ascii)),
-        Err(e) => a.err(
+        Ok(ascii) => a.ok(a.string(ctx, &ascii)),
+        Err(e) => a.err(ctx, 
             "selkie-error",
             &format!("selkie/render-ascii: render: {}", e),
         ),
