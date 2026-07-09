@@ -1,6 +1,6 @@
 //! Elle syn plugin — Rust syntax parsing via the `syn` crate.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 use quote::ToTokens;
 
 elle_plugin::define_plugin!("syn/", &PRIMITIVES);
@@ -9,63 +9,63 @@ elle_plugin::define_plugin!("syn/", &PRIMITIVES);
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn list(items: Vec<ElleValue>) -> ElleValue {
-    api().array(&items)
+fn list(ctx: *mut ElleCtx, items: Vec<ElleValue>) -> ElleValue {
+    api().array(ctx, &items)
 }
 
 // ---------------------------------------------------------------------------
 // Parsing primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_syn_parse_file(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_parse_file(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("syn/parse-file: expected string, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/parse-file: expected string, got {}", a.type_name(v))),
     };
     match syn::parse_file(&src) {
-        Ok(file) => a.ok(a.external("syn-file", file)),
-        Err(e) => a.err("parse-error", &format!("syn/parse-file: {}", e)),
+        Ok(file) => a.ok(a.external(ctx, "syn-file", file)),
+        Err(e) => a.err(ctx, "parse-error", &format!("syn/parse-file: {}", e)),
     }
 }
 
-extern "C" fn prim_syn_parse_expr(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_parse_expr(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("syn/parse-expr: expected string, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/parse-expr: expected string, got {}", a.type_name(v))),
     };
     match syn::parse_str::<syn::Expr>(&src) {
-        Ok(expr) => a.ok(a.external("syn-expr", expr)),
-        Err(e) => a.err("parse-error", &format!("syn/parse-expr: {}", e)),
+        Ok(expr) => a.ok(a.external(ctx, "syn-expr", expr)),
+        Err(e) => a.err(ctx, "parse-error", &format!("syn/parse-expr: {}", e)),
     }
 }
 
-extern "C" fn prim_syn_parse_type(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_parse_type(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("syn/parse-type: expected string, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/parse-type: expected string, got {}", a.type_name(v))),
     };
     match syn::parse_str::<syn::Type>(&src) {
-        Ok(ty) => a.ok(a.external("syn-type", ty)),
-        Err(e) => a.err("parse-error", &format!("syn/parse-type: {}", e)),
+        Ok(ty) => a.ok(a.external(ctx, "syn-type", ty)),
+        Err(e) => a.err(ctx, "parse-error", &format!("syn/parse-type: {}", e)),
     }
 }
 
-extern "C" fn prim_syn_parse_item(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_parse_item(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let src = match a.get_string(v) {
         Some(s) => s.to_string(),
-        None => return a.err("type-error", &format!("syn/parse-item: expected string, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/parse-item: expected string, got {}", a.type_name(v))),
     };
     match syn::parse_str::<syn::Item>(&src) {
-        Ok(item) => a.ok(a.external("syn-item", item)),
-        Err(e) => a.err("parse-error", &format!("syn/parse-item: {}", e)),
+        Ok(item) => a.ok(a.external(ctx, "syn-item", item)),
+        Err(e) => a.err(ctx, "parse-error", &format!("syn/parse-item: {}", e)),
     }
 }
 
@@ -73,35 +73,35 @@ extern "C" fn prim_syn_parse_item(args: *const ElleValue, nargs: usize) -> ElleR
 // Navigation primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_syn_items(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_items(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let file = match a.get_external::<syn::File>(v, "syn-file") {
         Some(f) => f,
-        None => return a.err("type-error", &format!("syn/items: expected syn-file, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/items: expected syn-file, got {}", a.type_name(v))),
     };
     let items: Vec<ElleValue> = file.items.iter()
-        .map(|item| a.external("syn-item", item.clone()))
+        .map(|item| a.external(ctx, "syn-item", item.clone()))
         .collect();
-    a.ok(list(items))
+    a.ok(list(ctx, items))
 }
 
-extern "C" fn prim_syn_item_kind(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_item_kind(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/item-kind: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/item-kind: expected syn-item, got {}", a.type_name(v))),
     };
     a.ok(a.keyword(item_kind_str(item)))
 }
 
-extern "C" fn prim_syn_item_name(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_item_name(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/item-name: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/item-name: expected syn-item, got {}", a.type_name(v))),
     };
     let name: Option<String> = match item {
         syn::Item::Fn(f) => Some(f.sig.ident.to_string()),
@@ -116,7 +116,7 @@ extern "C" fn prim_syn_item_name(args: *const ElleValue, nargs: usize) -> ElleRe
         _ => None,
     };
     match name {
-        Some(s) => a.ok(a.string(&s)),
+        Some(s) => a.ok(a.string(ctx, &s)),
         None => a.ok(a.nil()),
     }
 }
@@ -149,7 +149,7 @@ fn item_kind_str(item: &syn::Item) -> &'static str {
     }
 }
 
-fn fn_args_to_elle(sig: &syn::Signature) -> ElleValue {
+fn fn_args_to_elle(ctx: *mut ElleCtx, sig: &syn::Signature) -> ElleValue {
     let a = api();
     let args: Vec<ElleValue> = sig.inputs.iter().map(|arg| {
         match arg {
@@ -157,7 +157,7 @@ fn fn_args_to_elle(sig: &syn::Signature) -> ElleValue {
                 let ty_str = if r.reference.is_some() {
                     if r.mutability.is_some() { "&mut self" } else { "&self" }
                 } else { "self" };
-                a.build_struct(&[("name", a.string("self")), ("type", a.string(ty_str))])
+                a.build_struct(ctx, &[("name", a.string(ctx, "self")), ("type", a.string(ctx, ty_str))])
             }
             syn::FnArg::Typed(pt) => {
                 let name_str = match pt.pat.as_ref() {
@@ -165,35 +165,35 @@ fn fn_args_to_elle(sig: &syn::Signature) -> ElleValue {
                     _ => pt.pat.to_token_stream().to_string(),
                 };
                 let type_str = pt.ty.to_token_stream().to_string();
-                a.build_struct(&[("name", a.string(&name_str)), ("type", a.string(&type_str))])
+                a.build_struct(ctx, &[("name", a.string(ctx, &name_str)), ("type", a.string(ctx, &type_str))])
             }
         }
     }).collect();
-    list(args)
+    list(ctx, args)
 }
 
-fn fields_to_elle(fields: &syn::Fields) -> (ElleValue, ElleValue) {
+fn fields_to_elle(ctx: *mut ElleCtx, fields: &syn::Fields) -> (ElleValue, ElleValue) {
     let a = api();
     match fields {
         syn::Fields::Named(named) => {
             let fs: Vec<ElleValue> = named.named.iter().map(|f| {
                 let name_val = match &f.ident {
-                    Some(i) => a.string(&i.to_string()),
+                    Some(i) => a.string(ctx, &i.to_string()),
                     None => a.nil(),
                 };
                 let type_str = f.ty.to_token_stream().to_string();
-                a.build_struct(&[("name", name_val), ("type", a.string(&type_str))])
+                a.build_struct(ctx, &[("name", name_val), ("type", a.string(ctx, &type_str))])
             }).collect();
-            (a.keyword("named"), list(fs))
+            (a.keyword("named"), list(ctx, fs))
         }
         syn::Fields::Unnamed(unnamed) => {
             let fs: Vec<ElleValue> = unnamed.unnamed.iter().map(|f| {
                 let type_str = f.ty.to_token_stream().to_string();
-                a.build_struct(&[("name", a.nil()), ("type", a.string(&type_str))])
+                a.build_struct(ctx, &[("name", a.nil()), ("type", a.string(ctx, &type_str))])
             }).collect();
-            (a.keyword("tuple"), list(fs))
+            (a.keyword("tuple"), list(ctx, fs))
         }
-        syn::Fields::Unit => (a.keyword("unit"), list(vec![])),
+        syn::Fields::Unit => (a.keyword("unit"), list(ctx, vec![])),
     }
 }
 
@@ -201,25 +201,25 @@ fn fields_to_elle(fields: &syn::Fields) -> (ElleValue, ElleValue) {
 // Introspection primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_syn_fn_info(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_fn_info(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/fn-info: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/fn-info: expected syn-item, got {}", a.type_name(v))),
     };
     let func = match item {
         syn::Item::Fn(f) => f,
-        _ => return a.err("type-error", &format!("syn/fn-info: expected fn item, got :{}", item_kind_str(item))),
+        _ => return a.err(ctx, "type-error", &format!("syn/fn-info: expected fn item, got :{}", item_kind_str(item))),
     };
     let sig = &func.sig;
     let return_type_val = match &sig.output {
         syn::ReturnType::Default => a.nil(),
-        syn::ReturnType::Type(_, ty) => a.string(&ty.to_token_stream().to_string()),
+        syn::ReturnType::Type(_, ty) => a.string(ctx, &ty.to_token_stream().to_string()),
     };
     let mut fields: Vec<(&str, ElleValue)> = vec![
-        ("name", a.string(&sig.ident.to_string())),
-        ("args", fn_args_to_elle(sig)),
+        ("name", a.string(ctx, &sig.ident.to_string())),
+        ("args", fn_args_to_elle(ctx, sig)),
         ("return-type", return_type_val),
         ("async?", a.boolean(sig.asyncness.is_some())),
         ("unsafe?", a.boolean(sig.unsafety.is_some())),
@@ -228,95 +228,95 @@ extern "C" fn prim_syn_fn_info(args: *const ElleValue, nargs: usize) -> ElleResu
     if let Some(line) = item_start_line(item) {
         fields.push(("line", a.int(line as i64)));
     }
-    a.ok(a.build_struct(&fields))
+    a.ok(a.build_struct(ctx, &fields))
 }
 
-extern "C" fn prim_syn_fn_args(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_fn_args(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/fn-args: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/fn-args: expected syn-item, got {}", a.type_name(v))),
     };
     let func = match item {
         syn::Item::Fn(f) => f,
-        _ => return a.err("type-error", &format!("syn/fn-args: expected fn item, got :{}", item_kind_str(item))),
+        _ => return a.err(ctx, "type-error", &format!("syn/fn-args: expected fn item, got :{}", item_kind_str(item))),
     };
-    a.ok(fn_args_to_elle(&func.sig))
+    a.ok(fn_args_to_elle(ctx, &func.sig))
 }
 
-extern "C" fn prim_syn_fn_return_type(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_fn_return_type(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/fn-return-type: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/fn-return-type: expected syn-item, got {}", a.type_name(v))),
     };
     let func = match item {
         syn::Item::Fn(f) => f,
-        _ => return a.err("type-error", &format!("syn/fn-return-type: expected fn item, got :{}", item_kind_str(item))),
+        _ => return a.err(ctx, "type-error", &format!("syn/fn-return-type: expected fn item, got :{}", item_kind_str(item))),
     };
     match &func.sig.output {
         syn::ReturnType::Default => a.ok(a.nil()),
-        syn::ReturnType::Type(_, ty) => a.ok(a.string(&ty.to_token_stream().to_string())),
+        syn::ReturnType::Type(_, ty) => a.ok(a.string(ctx, &ty.to_token_stream().to_string())),
     }
 }
 
-extern "C" fn prim_syn_struct_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_struct_fields(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/struct-fields: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/struct-fields: expected syn-item, got {}", a.type_name(v))),
     };
     let st = match item {
         syn::Item::Struct(s) => s,
-        _ => return a.err("type-error", &format!("syn/struct-fields: expected struct item, got :{}", item_kind_str(item))),
+        _ => return a.err(ctx, "type-error", &format!("syn/struct-fields: expected struct item, got :{}", item_kind_str(item))),
     };
-    let (kind_kw, fields_list) = fields_to_elle(&st.fields);
-    a.ok(a.build_struct(&[
-        ("name", a.string(&st.ident.to_string())),
+    let (kind_kw, fields_list) = fields_to_elle(ctx, &st.fields);
+    a.ok(a.build_struct(ctx, &[
+        ("name", a.string(ctx, &st.ident.to_string())),
         ("kind", kind_kw),
         ("fields", fields_list),
     ]))
 }
 
-extern "C" fn prim_syn_enum_variants(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_enum_variants(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/enum-variants: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/enum-variants: expected syn-item, got {}", a.type_name(v))),
     };
     let en = match item {
         syn::Item::Enum(e) => e,
-        _ => return a.err("type-error", &format!("syn/enum-variants: expected enum item, got :{}", item_kind_str(item))),
+        _ => return a.err(ctx, "type-error", &format!("syn/enum-variants: expected enum item, got :{}", item_kind_str(item))),
     };
     let variants: Vec<ElleValue> = en.variants.iter().map(|va| {
-        let (kind_kw, fields_list) = fields_to_elle(&va.fields);
+        let (kind_kw, fields_list) = fields_to_elle(ctx, &va.fields);
         let mut fields: Vec<(&str, ElleValue)> = vec![
-            ("name", a.string(&va.ident.to_string())),
+            ("name", a.string(ctx, &va.ident.to_string())),
             ("kind", kind_kw),
             ("fields", fields_list),
         ];
         if let Some((_, disc_expr)) = &va.discriminant {
             let disc_str = disc_expr.to_token_stream().to_string();
-            fields.push(("discriminant", a.string(&disc_str)));
+            fields.push(("discriminant", a.string(ctx, &disc_str)));
         }
-        a.build_struct(&fields)
+        a.build_struct(ctx, &fields)
     }).collect();
-    a.ok(a.build_struct(&[
-        ("name", a.string(&en.ident.to_string())),
-        ("variants", list(variants)),
+    a.ok(a.build_struct(ctx, &[
+        ("name", a.string(ctx, &en.ident.to_string())),
+        ("variants", list(ctx, variants)),
     ]))
 }
 
-extern "C" fn prim_syn_attributes(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_attributes(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/attributes: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/attributes: expected syn-item, got {}", a.type_name(v))),
     };
     let attrs: &[syn::Attribute] = match item {
         syn::Item::Fn(f) => &f.attrs,
@@ -330,20 +330,20 @@ extern "C" fn prim_syn_attributes(args: *const ElleValue, nargs: usize) -> ElleR
         syn::Item::Static(s) => &s.attrs,
         syn::Item::Type(t) => &t.attrs,
         syn::Item::Macro(m) => &m.attrs,
-        _ => return a.ok(list(vec![])),
+        _ => return a.ok(list(ctx, vec![])),
     };
     let attr_strs: Vec<ElleValue> = attrs.iter()
-        .map(|at| a.string(&at.to_token_stream().to_string()))
+        .map(|at| a.string(ctx, &at.to_token_stream().to_string()))
         .collect();
-    a.ok(list(attr_strs))
+    a.ok(list(ctx, attr_strs))
 }
 
-extern "C" fn prim_syn_visibility(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_visibility(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/visibility: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/visibility: expected syn-item, got {}", a.type_name(v))),
     };
     let vis: Option<&syn::Visibility> = match item {
         syn::Item::Fn(f) => Some(&f.vis),
@@ -457,43 +457,43 @@ fn path_to_string(path: &syn::Path) -> String {
     path.segments.iter().map(|seg| seg.ident.to_string()).collect::<Vec<_>>().join("::")
 }
 
-extern "C" fn prim_syn_fn_calls(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_fn_calls(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/fn-calls: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/fn-calls: expected syn-item, got {}", a.type_name(v))),
     };
     let block = match item {
         syn::Item::Fn(f) => &f.block,
-        _ => return a.err("type-error", "syn/fn-calls: item must be a function"),
+        _ => return a.err(ctx, "type-error", "syn/fn-calls: item must be a function"),
     };
     let mut calls = Vec::new();
     for stmt in &block.stmts { collect_calls_stmt(stmt, &mut calls); }
     let mut seen = std::collections::HashSet::new();
     let unique: Vec<ElleValue> = calls.into_iter()
         .filter(|c| seen.insert(c.clone()))
-        .map(|c| a.string(&c))
+        .map(|c| a.string(ctx, &c))
         .collect();
-    a.ok(a.array(&unique))
+    a.ok(a.array(ctx, &unique))
 }
 
-extern "C" fn prim_syn_static_strings(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_static_strings(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/static-strings: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/static-strings: expected syn-item, got {}", a.type_name(v))),
     };
     let expr = match item {
         syn::Item::Static(s) => &*s.expr,
         syn::Item::Const(c) => &*c.expr,
-        _ => return a.err("type-error", "syn/static-strings: item must be static or const"),
+        _ => return a.err(ctx, "type-error", "syn/static-strings: item must be static or const"),
     };
     let mut strings = Vec::new();
     collect_string_lits(expr, &mut strings);
-    let values: Vec<ElleValue> = strings.iter().map(|s| a.string(s)).collect();
-    a.ok(a.array(&values))
+    let values: Vec<ElleValue> = strings.iter().map(|s| a.string(ctx, s)).collect();
+    a.ok(a.array(ctx, &values))
 }
 
 fn collect_string_lits(expr: &syn::Expr, strings: &mut Vec<String>) {
@@ -513,24 +513,24 @@ fn collect_string_lits(expr: &syn::Expr, strings: &mut Vec<String>) {
     }
 }
 
-extern "C" fn prim_syn_primitive_defs(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_primitive_defs(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/primitive-defs: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/primitive-defs: expected syn-item, got {}", a.type_name(v))),
     };
     let expr = match item {
         syn::Item::Const(c) => &*c.expr,
         syn::Item::Static(s) => &*s.expr,
-        _ => return a.err("type-error", "syn/primitive-defs: item must be static or const"),
+        _ => return a.err(ctx, "type-error", "syn/primitive-defs: item must be static or const"),
     };
     let mut results = Vec::new();
-    collect_primitive_defs(expr, &mut results);
-    a.ok(a.array(&results))
+    collect_primitive_defs(ctx, expr, &mut results);
+    a.ok(a.array(ctx, &results))
 }
 
-fn collect_primitive_defs(expr: &syn::Expr, results: &mut Vec<ElleValue>) {
+fn collect_primitive_defs(ctx: *mut ElleCtx, expr: &syn::Expr, results: &mut Vec<ElleValue>) {
     let a = api();
     match expr {
         syn::Expr::Struct(s) => {
@@ -549,14 +549,14 @@ fn collect_primitive_defs(expr: &syn::Expr, results: &mut Vec<ElleValue>) {
                 }
             }
             if let (Some(name), Some(func)) = (name_val, func_val) {
-                results.push(a.build_struct(&[
-                    ("name", a.string(&name)),
-                    ("func", a.string(&func)),
+                results.push(a.build_struct(ctx, &[
+                    ("name", a.string(ctx, &name)),
+                    ("func", a.string(ctx, &func)),
                 ]));
             }
         }
-        syn::Expr::Array(ar) => { for elem in &ar.elems { collect_primitive_defs(elem, results); } }
-        syn::Expr::Reference(r) => { collect_primitive_defs(&r.expr, results); }
+        syn::Expr::Array(ar) => { for elem in &ar.elems { collect_primitive_defs(ctx, elem, results); } }
+        syn::Expr::Reference(r) => { collect_primitive_defs(ctx, &r.expr, results); }
         _ => {}
     }
 }
@@ -565,45 +565,45 @@ fn collect_primitive_defs(expr: &syn::Expr, results: &mut Vec<ElleValue>) {
 // Serialization primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_syn_to_string(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_to_string(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     if let Some(file) = a.get_external::<syn::File>(v, "syn-file") {
-        return a.ok(a.string(&file.to_token_stream().to_string()));
+        return a.ok(a.string(ctx, &file.to_token_stream().to_string()));
     }
     if let Some(item) = a.get_external::<syn::Item>(v, "syn-item") {
-        return a.ok(a.string(&item.to_token_stream().to_string()));
+        return a.ok(a.string(ctx, &item.to_token_stream().to_string()));
     }
     if let Some(expr) = a.get_external::<syn::Expr>(v, "syn-expr") {
-        return a.ok(a.string(&expr.to_token_stream().to_string()));
+        return a.ok(a.string(ctx, &expr.to_token_stream().to_string()));
     }
     if let Some(ty) = a.get_external::<syn::Type>(v, "syn-type") {
-        return a.ok(a.string(&ty.to_token_stream().to_string()));
+        return a.ok(a.string(ctx, &ty.to_token_stream().to_string()));
     }
-    a.err("type-error", &format!("syn/to-string: expected syn-file, syn-item, syn-expr, or syn-type, got {}", a.type_name(v)))
+    a.err(ctx, "type-error", &format!("syn/to-string: expected syn-file, syn-item, syn-expr, or syn-type, got {}", a.type_name(v)))
 }
 
-extern "C" fn prim_syn_to_pretty_string(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_to_pretty_string(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     if let Some(file) = a.get_external::<syn::File>(v, "syn-file") {
         let s = prettyplease::unparse(file);
-        return a.ok(a.string(s.trim_end()));
+        return a.ok(a.string(ctx, s.trim_end()));
     }
     if let Some(item) = a.get_external::<syn::Item>(v, "syn-item") {
         let file = syn::File { shebang: None, attrs: vec![], items: vec![item.clone()] };
         let s = prettyplease::unparse(&file);
-        return a.ok(a.string(s.trim_end()));
+        return a.ok(a.string(ctx, s.trim_end()));
     }
-    a.err("type-error", &format!("syn/to-pretty-string: expected syn-file or syn-item, got {}", a.type_name(v)))
+    a.err(ctx, "type-error", &format!("syn/to-pretty-string: expected syn-file or syn-item, got {}", a.type_name(v)))
 }
 
-extern "C" fn prim_syn_item_line(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_syn_item_line(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let v = unsafe { a.arg(args, nargs, 0) };
     let item = match a.get_external::<syn::Item>(v, "syn-item") {
         Some(i) => i,
-        None => return a.err("type-error", &format!("syn/item-line: expected syn-item, got {}", a.type_name(v))),
+        None => return a.err(ctx, "type-error", &format!("syn/item-line: expected syn-item, got {}", a.type_name(v))),
     };
     match item_start_line(item) {
         Some(line) => a.ok(a.int(line as i64)),
