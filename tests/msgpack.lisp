@@ -50,8 +50,10 @@
 
 (assert (= (decode-fn (encode-fn (parse-float "-inf"))) (parse-float "-inf")) "float -infinity round-trips")
 
-## NaN: Elle = treats NaN as equal to itself (structural equality); assert-eq works
-(assert (= (decode-fn (encode-fn (parse-float "nan"))) (parse-float "nan")) "NaN round-trips as NaN")
+## NaN: elle v2 `=` follows IEEE semantics, so (= nan nan) is false. Verify the
+## round-trip yields a genuine NaN via self-inequality — only NaN is unequal to
+## itself, so this fails if decode produced any non-NaN value.
+(assert (let [r (decode-fn (encode-fn (parse-float "nan")))] (not (= r r))) "NaN round-trips as NaN")
 
 (assert (= (decode-fn (encode-fn "")) "") "empty string round-trips")
 

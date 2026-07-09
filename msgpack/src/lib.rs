@@ -1,6 +1,6 @@
 //! Elle MessagePack plugin — binary serialization for Elle values.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
 use rmp::decode::{read_marker, RmpRead};
 use rmp::Marker;
 
@@ -116,17 +116,18 @@ fn encode_value(buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), Str
 // Decode helpers
 // ---------------------------------------------------------------------------
 
-fn decode_value(rd: &mut &[u8], mode: Mode) -> Result<ElleValue, String> {
+fn decode_value(ctx: *mut ElleCtx, rd: &mut &[u8], mode: Mode) -> Result<ElleValue, String> {
     let prim_name = if mode == Mode::Tagged {
         "decode-tagged"
     } else {
         "decode"
     };
     let marker = read_marker(rd).map_err(|e| format!("msgpack/{}: {}", prim_name, e.0))?;
-    decode_value_from_marker(rd, marker, mode, prim_name)
+    decode_value_from_marker(ctx, rd, marker, mode, prim_name)
 }
 
 fn decode_value_from_marker(
+    ctx: *mut ElleCtx,
     rd: &mut &[u8],
     marker: Marker,
     mode: Mode,
@@ -201,64 +202,64 @@ fn decode_value_from_marker(
                 .map_err(|e| fmt_vread_err(prim_name, e))?;
             Ok(a.float(f))
         }
-        Marker::FixStr(len) => decode_string(rd, len as u32, prim_name),
+        Marker::FixStr(len) => decode_string(ctx, rd, len as u32, prim_name),
         Marker::Str8 => {
             let len = rd.read_data_u8().map_err(|e| fmt_vread_err(prim_name, e))? as u32;
-            decode_string(rd, len, prim_name)
+            decode_string(ctx, rd, len, prim_name)
         }
         Marker::Str16 => {
             let len = rd
                 .read_data_u16()
                 .map_err(|e| fmt_vread_err(prim_name, e))? as u32;
-            decode_string(rd, len, prim_name)
+            decode_string(ctx, rd, len, prim_name)
         }
         Marker::Str32 => {
             let len = rd
                 .read_data_u32()
                 .map_err(|e| fmt_vread_err(prim_name, e))?;
-            decode_string(rd, len, prim_name)
+            decode_string(ctx, rd, len, prim_name)
         }
         Marker::Bin8 => {
             let len = rd.read_data_u8().map_err(|e| fmt_vread_err(prim_name, e))? as u32;
-            decode_bytes(rd, len, prim_name)
+            decode_bytes(ctx, rd, len, prim_name)
         }
         Marker::Bin16 => {
             let len = rd
                 .read_data_u16()
                 .map_err(|e| fmt_vread_err(prim_name, e))? as u32;
-            decode_bytes(rd, len, prim_name)
+            decode_bytes(ctx, rd, len, prim_name)
         }
         Marker::Bin32 => {
             let len = rd
                 .read_data_u32()
                 .map_err(|e| fmt_vread_err(prim_name, e))?;
-            decode_bytes(rd, len, prim_name)
+            decode_bytes(ctx, rd, len, prim_name)
         }
-        Marker::FixArray(len) => decode_array(rd, len as u32, mode, prim_name),
+        Marker::FixArray(len) => decode_array(ctx, rd, len as u32, mode, prim_name),
         Marker::Array16 => {
             let len = rd
                 .read_data_u16()
                 .map_err(|e| fmt_vread_err(prim_name, e))? as u32;
-            decode_array(rd, len, mode, prim_name)
+            decode_array(ctx, rd, len, mode, prim_name)
         }
         Marker::Array32 => {
             let len = rd
                 .read_data_u32()
                 .map_err(|e| fmt_vread_err(prim_name, e))?;
-            decode_array(rd, len, mode, prim_name)
+            decode_array(ctx, rd, len, mode, prim_name)
         }
-        Marker::FixMap(len) => decode_map(rd, len as u32, mode, prim_name),
+        Marker::FixMap(len) => decode_map(ctx, rd, len as u32, mode, prim_name),
         Marker::Map16 => {
             let len = rd
                 .read_data_u16()
                 .map_err(|e| fmt_vread_err(prim_name, e))? as u32;
-            decode_map(rd, len, mode, prim_name)
+            decode_map(ctx, rd, len, mode, prim_name)
         }
         Marker::Map32 => {
             let len = rd
                 .read_data_u32()
                 .map_err(|e| fmt_vread_err(prim_name, e))?;
-            decode_map(rd, len, mode, prim_name)
+            decode_map(ctx, rd, len, mode, prim_name)
         }
         m @ (Marker::FixExt1
         | Marker::FixExt2
@@ -267,51 +268,51 @@ fn decode_value_from_marker(
         | Marker::FixExt16
         | Marker::Ext8
         | Marker::Ext16
-        | Marker::Ext32) => decode_ext(rd, m, mode, prim_name),
+        | Marker::Ext32) => decode_ext(ctx, rd, m, mode, prim_name),
         Marker::Reserved => Err(format!("msgpack/{}: reserved marker (0xc1)", prim_name)),
     }
 }
 
-fn decode_string(rd: &mut &[u8], len: u32, prim_name: &str) -> Result<ElleValue, String> {
+fn decode_string(ctx: *mut ElleCtx, rd: &mut &[u8], len: u32, prim_name: &str) -> Result<ElleValue, String> {
     let a = api();
     let mut data = vec![0u8; len as usize];
     rd.read_exact_buf(&mut data)
         .map_err(|e| format!("msgpack/{}: {}", prim_name, e))?;
     let s = std::str::from_utf8(&data)
         .map_err(|_| format!("msgpack/{}: invalid UTF-8 in string", prim_name))?;
-    Ok(a.string(s))
+    Ok(a.string(ctx, s))
 }
 
-fn decode_bytes(rd: &mut &[u8], len: u32, prim_name: &str) -> Result<ElleValue, String> {
+fn decode_bytes(ctx: *mut ElleCtx, rd: &mut &[u8], len: u32, prim_name: &str) -> Result<ElleValue, String> {
     let a = api();
     let mut data = vec![0u8; len as usize];
     rd.read_exact_buf(&mut data)
         .map_err(|e| format!("msgpack/{}: {}", prim_name, e))?;
-    Ok(a.bytes(&data))
+    Ok(a.bytes(ctx, &data))
 }
 
-fn decode_array(rd: &mut &[u8], len: u32, mode: Mode, _prim_name: &str) -> Result<ElleValue, String> {
+fn decode_array(ctx: *mut ElleCtx, rd: &mut &[u8], len: u32, mode: Mode, _prim_name: &str) -> Result<ElleValue, String> {
     let a = api();
     let mut elements = Vec::with_capacity(len as usize);
     for _ in 0..len {
-        elements.push(decode_value(rd, mode)?);
+        elements.push(decode_value(ctx, rd, mode)?);
     }
-    Ok(a.array(&elements))
+    Ok(a.array(ctx, &elements))
 }
 
-fn decode_map(rd: &mut &[u8], len: u32, mode: Mode, prim_name: &str) -> Result<ElleValue, String> {
+fn decode_map(ctx: *mut ElleCtx, rd: &mut &[u8], len: u32, mode: Mode, prim_name: &str) -> Result<ElleValue, String> {
     let a = api();
     let mut fields: Vec<(String, ElleValue)> = Vec::with_capacity(len as usize);
     for _ in 0..len {
-        let key_str = decode_map_key_string(rd, mode, prim_name)?;
-        let val = decode_value(rd, mode)?;
+        let key_str = decode_map_key_string(ctx, rd, mode, prim_name)?;
+        let val = decode_value(ctx, rd, mode)?;
         fields.push((key_str, val));
     }
     let kvs: Vec<(&str, ElleValue)> = fields.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-    Ok(a.build_struct(&kvs))
+    Ok(a.build_struct(ctx, &kvs))
 }
 
-fn decode_map_key_string(rd: &mut &[u8], mode: Mode, prim_name: &str) -> Result<String, String> {
+fn decode_map_key_string(ctx: *mut ElleCtx, rd: &mut &[u8], mode: Mode, prim_name: &str) -> Result<String, String> {
     let marker = read_marker(rd).map_err(|e| format!("msgpack/{}: {}", prim_name, e.0))?;
 
     // In tagged mode, intercept ext markers: ext(1) means keyword key
@@ -330,7 +331,7 @@ fn decode_map_key_string(rd: &mut &[u8], mode: Mode, prim_name: &str) -> Result<
                 let mut payload = vec![0u8; size as usize];
                 rd.read_exact_buf(&mut payload)
                     .map_err(|e| format!("msgpack/{}: {}", prim_name, e))?;
-                let name_val = decode_value(&mut payload.as_slice(), mode)?;
+                let name_val = decode_value(ctx, &mut payload.as_slice(), mode)?;
                 let a = api();
                 if let Some(s) = a.get_string(name_val) {
                     return Ok(s.to_string());
@@ -350,7 +351,7 @@ fn decode_map_key_string(rd: &mut &[u8], mode: Mode, prim_name: &str) -> Result<
     }
 
     // For non-ext markers (or interop mode), decode the value and extract string key
-    let val = decode_value_from_marker(rd, marker, mode, prim_name)?;
+    let val = decode_value_from_marker(ctx, rd, marker, mode, prim_name)?;
     let a = api();
     if let Some(s) = a.get_string(val) {
         Ok(s.to_string())
@@ -370,6 +371,7 @@ fn decode_map_key_string(rd: &mut &[u8], mode: Mode, prim_name: &str) -> Result<
 }
 
 fn decode_ext(
+    ctx: *mut ElleCtx,
     rd: &mut &[u8],
     marker: Marker,
     mode: Mode,
@@ -391,7 +393,7 @@ fn decode_ext(
 
     match typeid {
         EXT_KEYWORD => {
-            let name_val = decode_value(&mut payload.as_slice(), mode)?;
+            let name_val = decode_value(ctx, &mut payload.as_slice(), mode)?;
             match a.get_string(name_val) {
                 Some(name) => Ok(a.keyword(name)),
                 None => Err(format!(
@@ -402,14 +404,14 @@ fn decode_ext(
             }
         }
         EXT_SET => {
-            let arr_val = decode_value(&mut payload.as_slice(), mode)?;
+            let arr_val = decode_value(ctx, &mut payload.as_slice(), mode)?;
             match a.get_array_len(arr_val) {
                 Some(len) => {
                     let mut elems = Vec::with_capacity(len);
                     for i in 0..len {
                         elems.push(a.get_array_item(arr_val, i));
                     }
-                    Ok(a.set(&elems))
+                    Ok(a.set(ctx, &elems))
                 }
                 None => Err(format!(
                     "msgpack/{}: ext(2) set payload must be an array",
@@ -419,7 +421,7 @@ fn decode_ext(
         }
         _EXT_LIST => {
             // Lists become arrays in the new API
-            let arr_val = decode_value(&mut payload.as_slice(), mode)?;
+            let arr_val = decode_value(ctx, &mut payload.as_slice(), mode)?;
             Ok(arr_val)
         }
         _EXT_SYMBOL => Err(format!(
@@ -647,23 +649,23 @@ fn read_u32_be(rd: &mut &[u8]) -> Option<u32> {
 // Primitive wrappers
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_msgpack_encode(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_msgpack_encode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let mut buf = Vec::new();
     match encode_value(&mut buf, val, Mode::Interop) {
-        Ok(()) => a.ok(a.bytes(&buf)),
-        Err(msg) => a.err("msgpack-error", &msg),
+        Ok(()) => a.ok(a.bytes(ctx, &buf)),
+        Err(msg) => a.err(ctx, "msgpack-error", &msg),
     }
 }
 
-extern "C" fn prim_msgpack_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_msgpack_decode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let data = match a.get_bytes(val) {
         Some(b) => b.to_vec(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("msgpack/decode: expected bytes, got {}", a.type_name(val)),
             );
@@ -671,10 +673,10 @@ extern "C" fn prim_msgpack_decode(args: *const ElleValue, nargs: usize) -> ElleR
     };
 
     let mut rd = data.as_slice();
-    match decode_value(&mut rd, Mode::Interop) {
+    match decode_value(ctx, &mut rd, Mode::Interop) {
         Ok(result) => {
             if !rd.is_empty() {
-                a.err(
+                a.err(ctx, 
                     "msgpack-error",
                     &format!("msgpack/decode: {} trailing bytes after value", rd.len()),
                 )
@@ -682,11 +684,11 @@ extern "C" fn prim_msgpack_decode(args: *const ElleValue, nargs: usize) -> ElleR
                 a.ok(result)
             }
         }
-        Err(msg) => a.err("msgpack-error", &msg),
+        Err(msg) => a.err(ctx, "msgpack-error", &msg),
     }
 }
 
-extern "C" fn prim_msgpack_valid(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_msgpack_valid(_ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let data = match a.get_bytes(val) {
@@ -704,23 +706,23 @@ extern "C" fn prim_msgpack_valid(args: *const ElleValue, nargs: usize) -> ElleRe
     a.ok(a.boolean(result))
 }
 
-extern "C" fn prim_msgpack_encode_tagged(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_msgpack_encode_tagged(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let mut buf = Vec::new();
     match encode_value(&mut buf, val, Mode::Tagged) {
-        Ok(()) => a.ok(a.bytes(&buf)),
-        Err(msg) => a.err("msgpack-error", &msg),
+        Ok(()) => a.ok(a.bytes(ctx, &buf)),
+        Err(msg) => a.err(ctx, "msgpack-error", &msg),
     }
 }
 
-extern "C" fn prim_msgpack_decode_tagged(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_msgpack_decode_tagged(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let data = match a.get_bytes(val) {
         Some(b) => b.to_vec(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "msgpack/decode-tagged: expected bytes, got {}",
@@ -731,10 +733,10 @@ extern "C" fn prim_msgpack_decode_tagged(args: *const ElleValue, nargs: usize) -
     };
 
     let mut rd = data.as_slice();
-    match decode_value(&mut rd, Mode::Tagged) {
+    match decode_value(ctx, &mut rd, Mode::Tagged) {
         Ok(result) => {
             if !rd.is_empty() {
-                a.err(
+                a.err(ctx, 
                     "msgpack-error",
                     &format!(
                         "msgpack/decode-tagged: {} trailing bytes after value",
@@ -745,7 +747,7 @@ extern "C" fn prim_msgpack_decode_tagged(args: *const ElleValue, nargs: usize) -
                 a.ok(result)
             }
         }
-        Err(msg) => a.err("msgpack-error", &msg),
+        Err(msg) => a.err(ctx, "msgpack-error", &msg),
     }
 }
 
