@@ -7,22 +7,22 @@ use context::GpuCtx;
 use dispatch::{BufferSpec, BufferUsage, DispatchBuffer, GpuBuffer, GpuHandle};
 use shader::GpuShader;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_IO, SIG_YIELD};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_IO, SIG_YIELD};
 
 elle_plugin::define_plugin!("vulkan/", &PRIMITIVES);
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-fn get_ctx<'a>(val: ElleValue, name: &str) -> Result<&'a GpuCtx, ElleResult> {
+fn get_ctx<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a GpuCtx, ElleResult> {
     let a = api();
     a.get_external::<GpuCtx>(val, "vulkan-ctx")
-        .ok_or_else(|| a.err("type-error", &format!("{name}: expected vulkan-ctx, got {}", a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{name}: expected vulkan-ctx, got {}", a.type_name(val))))
 }
 
-fn get_shader<'a>(val: ElleValue, name: &str) -> Result<&'a GpuShader, ElleResult> {
+fn get_shader<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a GpuShader, ElleResult> {
     let a = api();
     a.get_external::<GpuShader>(val, "vulkan-shader")
-        .ok_or_else(|| a.err("type-error", &format!("{name}: expected vulkan-shader, got {}", a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{name}: expected vulkan-shader, got {}", a.type_name(val))))
 }
 
 fn extract_keyword(val: ElleValue) -> Option<String> {
@@ -42,19 +42,19 @@ fn struct_get(val: ElleValue, key: &str) -> Option<ElleValue> {
 
 // ── vulkan/init ─────────────────────────────────────────────────
 
-extern "C" fn prim_init(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_init(ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     let a = api();
     match context::init_vulkan() {
-        Ok(ctx) => a.ok(a.external("vulkan-ctx", ctx)),
-        Err(msg) => a.err("gpu-error", &msg),
+        Ok(gpu) => a.ok(a.external(ctx, "vulkan-ctx", gpu)),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 
 // ── vulkan/shader ───────────────────────────────────────────────
 
-extern "C" fn prim_shader(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_shader(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let ctx = match get_ctx(unsafe { a.arg(args, nargs, 0) }, "vulkan/shader") {
+    let gpu = match get_ctx(ctx, unsafe { a.arg(args, nargs, 0) }, "vulkan/shader") {
         Ok(c) => c,
         Err(e) => return e,
     };
@@ -62,7 +62,7 @@ extern "C" fn prim_shader(args: *const ElleValue, nargs: usize) -> ElleResult {
     let num_buf_val = unsafe { a.arg(args, nargs, 2) };
     let num_buffers = match a.get_int(num_buf_val) {
         Some(n) if n > 0 => n as u32,
-        _ => return a.err("value-error", "vulkan/shader: num-buffers must be positive"),
+        _ => return a.err(ctx, "value-error", "vulkan/shader: num-buffers must be positive"),
     };
 
     let spirv = if let Some(b) = a.get_bytes(spirv_val) {
@@ -70,26 +70,26 @@ extern "C" fn prim_shader(args: *const ElleValue, nargs: usize) -> ElleResult {
     } else if let Some(path) = a.get_string(spirv_val) {
         match std::fs::read(path) {
             Ok(b) => b,
-            Err(e) => return a.err("io-error", &format!("vulkan/shader: {e}")),
+            Err(e) => return a.err(ctx, "io-error", &format!("vulkan/shader: {e}")),
         }
     } else {
-        return a.err(
+        return a.err(ctx, 
             "type-error",
             &format!("vulkan/shader: expected bytes or path string, got {}", a.type_name(spirv_val)),
         );
     };
 
-    match shader::create_shader(&ctx.inner, &spirv, num_buffers) {
-        Ok(s) => a.ok(a.external("vulkan-shader", s)),
-        Err(msg) => a.err("gpu-error", &msg),
+    match shader::create_shader(&gpu.inner, &spirv, num_buffers) {
+        Ok(s) => a.ok(a.external(ctx, "vulkan-shader", s)),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 
 // ── vulkan/dispatch ─────────────────────────────────────────────
 
-extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_dispatch(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let shader = match get_shader(unsafe { a.arg(args, nargs, 0) }, "vulkan/dispatch") {
+    let shader = match get_shader(ctx, unsafe { a.arg(args, nargs, 0) }, "vulkan/dispatch") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -97,7 +97,7 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
     let wg = |i: usize, name: &str| -> Result<u32, ElleResult> {
         match a.get_int(unsafe { a.arg(args, nargs, i) }) {
             Some(n) if n > 0 => Ok(n as u32),
-            _ => Err(a.err("value-error", &format!("vulkan/dispatch: {name} must be positive"))),
+            _ => Err(a.err(ctx, "value-error", &format!("vulkan/dispatch: {name} must be positive"))),
         }
     };
     let wg_x = match wg(1, "wg-x") { Ok(v) => v, Err(e) => return e };
@@ -107,20 +107,20 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
     let bufs_val = unsafe { a.arg(args, nargs, 4) };
     let buf_len = match a.get_array_len(bufs_val) {
         Some(n) => n,
-        None => return a.err("type-error", "vulkan/dispatch: buffers must be an array"),
+        None => return a.err(ctx, "type-error", "vulkan/dispatch: buffers must be an array"),
     };
 
     let mut dbufs = Vec::with_capacity(buf_len);
     for i in 0..buf_len {
         let spec_val = a.get_array_item(bufs_val, i);
-        match parse_dispatch_buffer(spec_val, i, "vulkan/dispatch") {
+        match parse_dispatch_buffer(ctx, spec_val, i, "vulkan/dispatch") {
             Ok(db) => dbufs.push(db),
             Err(e) => return e,
         }
     }
 
     if dbufs.len() != shader.num_buffers as usize {
-        return a.err(
+        return a.err(ctx, 
             "value-error",
             &format!(
                 "vulkan/dispatch: shader expects {} buffers, got {}",
@@ -137,20 +137,20 @@ extern "C" fn prim_dispatch(args: *const ElleValue, nargs: usize) -> ElleResult 
         [wg_x, wg_y, wg_z],
         dbufs,
     ) {
-        Ok(handle) => a.ok(a.external("vulkan-handle", handle)),
-        Err(msg) => a.err("gpu-error", &msg),
+        Ok(handle) => a.ok(a.external(ctx, "vulkan-handle", handle)),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 
 // ── vulkan/wait ─────────────────────────────────────────────────
 
-extern "C" fn prim_wait(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_wait(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let handle_val = unsafe { a.arg(args, nargs, 0) };
     let handle = match a.get_external::<GpuHandle>(handle_val, "vulkan-handle") {
         Some(h) => h,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("vulkan/wait: expected vulkan-handle, got {}", a.type_name(handle_val)),
             );
@@ -159,19 +159,19 @@ extern "C" fn prim_wait(args: *const ElleValue, nargs: usize) -> ElleResult {
     let fd = handle.fence_fd;
     ElleResult {
         signal: SIG_YIELD | SIG_IO,
-        value: a.poll_fd(fd, libc::POLLIN as u32),
+        value: a.poll_fd(ctx, fd, libc::POLLIN as u32),
     }
 }
 
 // ── vulkan/collect ──────────────────────────────────────────────
 
-extern "C" fn prim_collect(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_collect(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let handle_val = unsafe { a.arg(args, nargs, 0) };
     let handle = match a.get_external::<GpuHandle>(handle_val, "vulkan-handle") {
         Some(h) => h,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("vulkan/collect: expected vulkan-handle, got {}", a.type_name(handle_val)),
             );
@@ -179,8 +179,8 @@ extern "C" fn prim_collect(args: *const ElleValue, nargs: usize) -> ElleResult {
     };
 
     match dispatch::collect_ref(handle) {
-        Ok(bytes) => a.ok(a.bytes(&bytes)),
-        Err(msg) => a.err("gpu-error", &msg),
+        Ok(bytes) => a.ok(a.bytes(ctx, &bytes)),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 
@@ -188,9 +188,9 @@ extern "C" fn prim_collect(args: *const ElleValue, nargs: usize) -> ElleResult {
 // NOTE: IoRequest::task is not available through stable ABI. This primitive
 // is kept as a synchronous blocking call on the current thread.
 
-extern "C" fn prim_submit(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_submit(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let shader = match get_shader(unsafe { a.arg(args, nargs, 0) }, "vulkan/submit") {
+    let shader = match get_shader(ctx, unsafe { a.arg(args, nargs, 0) }, "vulkan/submit") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -198,7 +198,7 @@ extern "C" fn prim_submit(args: *const ElleValue, nargs: usize) -> ElleResult {
     let wg = |i: usize, name: &str| -> Result<u32, ElleResult> {
         match a.get_int(unsafe { a.arg(args, nargs, i) }) {
             Some(n) if n > 0 => Ok(n as u32),
-            _ => Err(a.err("value-error", &format!("vulkan/submit: {name} must be positive"))),
+            _ => Err(a.err(ctx, "value-error", &format!("vulkan/submit: {name} must be positive"))),
         }
     };
     let wg_x = match wg(1, "wg-x") { Ok(v) => v, Err(e) => return e };
@@ -208,20 +208,20 @@ extern "C" fn prim_submit(args: *const ElleValue, nargs: usize) -> ElleResult {
     let bufs_val = unsafe { a.arg(args, nargs, 4) };
     let buf_len = match a.get_array_len(bufs_val) {
         Some(n) => n,
-        None => return a.err("type-error", "vulkan/submit: buffers must be an array"),
+        None => return a.err(ctx, "type-error", "vulkan/submit: buffers must be an array"),
     };
 
     let mut dbufs = Vec::with_capacity(buf_len);
     for i in 0..buf_len {
         let spec_val = a.get_array_item(bufs_val, i);
-        match parse_dispatch_buffer(spec_val, i, "vulkan/submit") {
+        match parse_dispatch_buffer(ctx, spec_val, i, "vulkan/submit") {
             Ok(db) => dbufs.push(db),
             Err(e) => return e,
         }
     }
 
     if dbufs.len() != shader.num_buffers as usize {
-        return a.err(
+        return a.err(ctx, 
             "value-error",
             &format!(
                 "vulkan/submit: shader expects {} buffers, got {}",
@@ -254,16 +254,17 @@ extern "C" fn prim_submit(args: *const ElleValue, nargs: usize) -> ElleResult {
             .ok();
             drop(state);
             match dispatch::collect_ref(&handle) {
-                Ok(bytes) => a.ok(a.bytes(&bytes)),
-                Err(msg) => a.err("gpu-error", &msg),
+                Ok(bytes) => a.ok(a.bytes(ctx, &bytes)),
+                Err(msg) => a.err(ctx, "gpu-error", &msg),
             }
         }
-        Err(msg) => a.err("gpu-error", &msg),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 
 /// Parse a dispatch buffer: either a persistent GpuBuffer or a fresh BufferSpec.
 fn parse_dispatch_buffer(
+    ctx: *mut ElleCtx,
     val: ElleValue,
     index: usize,
     caller: &str,
@@ -276,10 +277,11 @@ fn parse_dispatch_buffer(
             usage: BufferUsage::Input,
         });
     }
-    parse_buffer_spec(val, index, caller).map(DispatchBuffer::Spec)
+    parse_buffer_spec(ctx, val, index, caller).map(DispatchBuffer::Spec)
 }
 
 fn parse_buffer_spec(
+    ctx: *mut ElleCtx,
     val: ElleValue,
     index: usize,
     caller: &str,
@@ -287,7 +289,7 @@ fn parse_buffer_spec(
     let a = api();
 
     let usage_val = struct_get(val, "usage").ok_or_else(|| {
-        a.err("value-error", &format!("{caller}: buffer[{index}] missing :usage"))
+        a.err(ctx, "value-error", &format!("{caller}: buffer[{index}] missing :usage"))
     })?;
 
     let usage = match extract_keyword(usage_val) {
@@ -295,7 +297,7 @@ fn parse_buffer_spec(
         Some(ref k) if k == "output" => BufferUsage::Output,
         Some(ref k) if k == "inout" => BufferUsage::InOut,
         _ => {
-            return Err(a.err(
+            return Err(a.err(ctx, 
                 "value-error",
                 &format!("{caller}: buffer[{index}] :usage must be :input, :output, or :inout"),
             ));
@@ -304,10 +306,10 @@ fn parse_buffer_spec(
 
     if usage == BufferUsage::Output {
         let size_val = struct_get(val, "size").ok_or_else(|| {
-            a.err("value-error", &format!("{caller}: output buffer[{index}] missing :size"))
+            a.err(ctx, "value-error", &format!("{caller}: output buffer[{index}] missing :size"))
         })?;
         let byte_size = a.get_int(size_val).ok_or_else(|| {
-            a.err("type-error", &format!("{caller}: buffer[{index}] :size must be integer"))
+            a.err(ctx, "type-error", &format!("{caller}: buffer[{index}] :size must be integer"))
         })? as usize;
         return Ok(BufferSpec {
             data: Vec::new(),
@@ -317,11 +319,11 @@ fn parse_buffer_spec(
     }
 
     let data_val = struct_get(val, "data").ok_or_else(|| {
-        a.err("value-error", &format!("{caller}: buffer[{index}] missing :data"))
+        a.err(ctx, "value-error", &format!("{caller}: buffer[{index}] missing :data"))
     })?;
 
     let arr_len = a.get_array_len(data_val).ok_or_else(|| {
-        a.err("type-error", &format!("{caller}: buffer[{index}] :data must be an array"))
+        a.err(ctx, "type-error", &format!("{caller}: buffer[{index}] :data must be an array"))
     })?;
 
     let dtype = struct_get(val, "dtype")
@@ -337,30 +339,30 @@ fn parse_buffer_spec(
                 let f = if let Some(f) = a.get_float(v) { f as f32 }
                     else if let Some(i) = a.get_int(v) { i as f32 }
                     else {
-                        return Err(a.err("type-error",
+                        return Err(a.err(ctx, "type-error",
                             &format!("{caller}: buffer[{index}][{j}] must be numeric, got {}", a.type_name(v))));
                     };
                 bytes.extend_from_slice(&f.to_le_bytes());
             }
             "u32" => {
                 let n = a.get_int(v)
-                    .ok_or_else(|| a.err("type-error",
+                    .ok_or_else(|| a.err(ctx, "type-error",
                         &format!("{caller}: buffer[{index}][{j}] must be integer for :u32")))?;
                 bytes.extend_from_slice(&(n as u32).to_le_bytes());
             }
             "i32" => {
                 let n = a.get_int(v)
-                    .ok_or_else(|| a.err("type-error",
+                    .ok_or_else(|| a.err(ctx, "type-error",
                         &format!("{caller}: buffer[{index}][{j}] must be integer for :i32")))?;
                 bytes.extend_from_slice(&(n as i32).to_le_bytes());
             }
             "i64" => {
                 let n = a.get_int(v)
-                    .ok_or_else(|| a.err("type-error",
+                    .ok_or_else(|| a.err(ctx, "type-error",
                         &format!("{caller}: buffer[{index}][{j}] must be integer for :i64")))?;
                 bytes.extend_from_slice(&n.to_le_bytes());
             }
-            _ => return Err(a.err("value-error",
+            _ => return Err(a.err(ctx, "value-error",
                 &format!("{caller}: buffer[{index}] unsupported :dtype {dtype:?}, expected :f32, :u32, :i32, or :i64"))),
         }
     }
@@ -375,13 +377,13 @@ fn parse_buffer_spec(
 
 // ── vulkan/decode ───────────────────────────────────────────────
 
-extern "C" fn prim_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_decode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let bytes_val = unsafe { a.arg(args, nargs, 0) };
     let bytes = match a.get_bytes(bytes_val) {
         Some(b) => b.to_vec(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("vulkan/decode: expected bytes, got {}", a.type_name(bytes_val)),
             );
@@ -392,22 +394,22 @@ extern "C" fn prim_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let dtype = match extract_keyword(dtype_val) {
         Some(k) if matches!(k.as_str(), "f32" | "u32" | "i32" | "i64" | "raw") => k,
         _ => {
-            return a.err(
+            return a.err(ctx, 
                 "value-error",
                 "vulkan/decode: dtype must be :f32, :u32, :i32, :i64, or :raw",
             );
         }
     };
 
-    match decode::decode(&bytes, &dtype) {
+    match decode::decode(ctx, &bytes, &dtype) {
         Ok(val) => a.ok(val),
-        Err(msg) => a.err("gpu-error", &msg),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 
 // ── vulkan/f32-bits ─────────────────────────────────────────────
 
-extern "C" fn prim_f32_bits(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_f32_bits(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let f = if let Some(f) = a.get_float(val) {
@@ -415,7 +417,7 @@ extern "C" fn prim_f32_bits(args: *const ElleValue, nargs: usize) -> ElleResult 
     } else if let Some(i) = a.get_int(val) {
         i as f64
     } else {
-        return a.err(
+        return a.err(ctx, 
             "type-error",
             &format!("vulkan/f32-bits: expected number, got {}", a.type_name(val)),
         );
@@ -426,14 +428,14 @@ extern "C" fn prim_f32_bits(args: *const ElleValue, nargs: usize) -> ElleResult 
 
 // ── vulkan/persist ──────────────────────────────────────────────
 
-extern "C" fn prim_persist(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_persist(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    let ctx = match get_ctx(unsafe { a.arg(args, nargs, 0) }, "vulkan/persist") {
+    let gpu = match get_ctx(ctx, unsafe { a.arg(args, nargs, 0) }, "vulkan/persist") {
         Ok(c) => c,
         Err(e) => return e,
     };
 
-    let spec = match parse_buffer_spec(unsafe { a.arg(args, nargs, 1) }, 0, "vulkan/persist") {
+    let spec = match parse_buffer_spec(ctx, unsafe { a.arg(args, nargs, 1) }, 0, "vulkan/persist") {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -444,18 +446,18 @@ extern "C" fn prim_persist(args: *const ElleValue, nargs: usize) -> ElleResult {
         BufferUsage::InOut => gpu_allocator::MemoryLocation::CpuToGpu,
     };
 
-    let mut state = match ctx.inner.lock() {
+    let mut state = match gpu.inner.lock() {
         Ok(s) => s,
-        Err(e) => return a.err("gpu-error", &format!("lock: {e}")),
+        Err(e) => return a.err(ctx, "gpu-error", &format!("lock: {e}")),
     };
 
     let (buffer, allocation) = match state.acquire_buffer(spec.byte_size, location, 0) {
         Ok(ba) => ba,
-        Err(msg) => return a.err("gpu-error", &msg),
+        Err(msg) => return a.err(ctx, "gpu-error", &msg),
     };
 
     let gpu_buf = GpuBuffer {
-        ctx: ctx.inner.clone(),
+        ctx: gpu.inner.clone(),
         buffer,
         allocation,
         byte_size: spec.byte_size,
@@ -464,36 +466,36 @@ extern "C" fn prim_persist(args: *const ElleValue, nargs: usize) -> ElleResult {
 
     if !spec.data.is_empty() {
         if let Err(msg) = gpu_buf.upload(&spec.data) {
-            return a.err("gpu-error", &msg);
+            return a.err(ctx, "gpu-error", &msg);
         }
     }
 
-    a.ok(a.external("vulkan-buffer", gpu_buf))
+    a.ok(a.external(ctx, "vulkan-buffer", gpu_buf))
 }
 
 // ── vulkan/update ──────────────────────────────────────────────
 
-extern "C" fn prim_update(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_update(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let buf_val = unsafe { a.arg(args, nargs, 0) };
     let gpu_buf = match a.get_external::<GpuBuffer>(buf_val, "vulkan-buffer") {
         Some(b) => b,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("vulkan/update: expected vulkan-buffer, got {}", a.type_name(buf_val)),
             );
         }
     };
 
-    let spec = match parse_buffer_spec(unsafe { a.arg(args, nargs, 1) }, 0, "vulkan/update") {
+    let spec = match parse_buffer_spec(ctx, unsafe { a.arg(args, nargs, 1) }, 0, "vulkan/update") {
         Ok(s) => s,
         Err(e) => return e,
     };
 
     match gpu_buf.upload(&spec.data) {
         Ok(()) => a.ok(a.nil()),
-        Err(msg) => a.err("gpu-error", &msg),
+        Err(msg) => a.err(ctx, "gpu-error", &msg),
     }
 }
 

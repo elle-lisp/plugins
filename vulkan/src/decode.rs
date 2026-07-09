@@ -1,4 +1,4 @@
-use elle_plugin::ElleValue;
+use elle_plugin::{ElleCtx, ElleValue};
 
 /// Decode the output bytes from a GPU dispatch into Elle arrays.
 ///
@@ -10,7 +10,7 @@ use elle_plugin::ElleValue;
 /// For i64 dtype, we reinterpret: actual_elements = raw_count / 2.
 ///
 /// Returns a single array if one output buffer, or array-of-arrays if multiple.
-pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<ElleValue, String> {
+pub(crate) fn decode(ctx: *mut ElleCtx, bytes: &[u8], dtype: &str) -> Result<ElleValue, String> {
     let a = crate::api();
     if bytes.len() < 4 {
         return Err("result bytes too short for header".into());
@@ -70,20 +70,20 @@ pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<ElleValue, String> {
                 })
                 .collect(),
             "raw" => {
-                arrays.push(a.bytes(chunk));
+                arrays.push(a.bytes(ctx, chunk));
                 offset += data_bytes;
                 continue;
             }
             _ => return Err(format!("unsupported dtype: {dtype:?}")),
         };
 
-        arrays.push(a.array(&elements));
+        arrays.push(a.array(ctx, &elements));
         offset += data_bytes;
     }
 
     if arrays.len() == 1 {
         Ok(arrays.into_iter().next().unwrap())
     } else {
-        Ok(a.array(&arrays))
+        Ok(a.array(ctx, &arrays))
     }
 }
