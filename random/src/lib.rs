@@ -1,7 +1,7 @@
 //! Elle random plugin — pseudo-random and cryptographically secure random
 //! number generation via the `rand` and `rand_chacha` crates.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 use rand::seq::SliceRandom;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -52,13 +52,13 @@ fn extract_float(val: ElleValue) -> Option<f64> {
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_random_seed(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_seed(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let seed = match a.get_int(arg0) {
         Some(n) => n as u64,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("random/seed: expected integer, got {}", a.type_name(arg0)),
             );
@@ -68,7 +68,7 @@ extern "C" fn prim_random_seed(args: *const ElleValue, nargs: usize) -> ElleResu
     a.ok(a.nil())
 }
 
-extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_int(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let mut rng = rng().lock().unwrap();
     let val = match nargs {
@@ -78,14 +78,14 @@ extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResul
             let max = match a.get_int(arg0) {
                 Some(n) => n,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!("random/int: expected integer, got {}", a.type_name(arg0)),
                     );
                 }
             };
             if max <= 0 {
-                return a.err("range-error", "random/int: max must be positive");
+                return a.err(ctx, "range-error", "random/int: max must be positive");
             }
             rng.random_range(0..max)
         }
@@ -95,7 +95,7 @@ extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResul
             let min = match a.get_int(arg0) {
                 Some(n) => n,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!("random/int: expected integer, got {}", a.type_name(arg0)),
                     );
@@ -104,19 +104,19 @@ extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResul
             let max = match a.get_int(arg1) {
                 Some(n) => n,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!("random/int: expected integer, got {}", a.type_name(arg1)),
                     );
                 }
             };
             if min >= max {
-                return a.err("range-error", "random/int: min must be less than max");
+                return a.err(ctx, "range-error", "random/int: min must be less than max");
             }
             rng.random_range(min..max)
         }
         _ => {
-            return a.err(
+            return a.err(ctx, 
                 "arity-error",
                 &format!("random/int: expected 0-2 arguments, got {}", nargs),
             );
@@ -125,26 +125,26 @@ extern "C" fn prim_random_int(args: *const ElleValue, nargs: usize) -> ElleResul
     a.ok(a.int(val))
 }
 
-extern "C" fn prim_random_float(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_random_float(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     let a = api();
     a.ok(a.float(rng().lock().unwrap().random::<f64>()))
 }
 
-extern "C" fn prim_random_bool(_args: *const ElleValue, _nargs: usize) -> ElleResult {
+extern "C" fn prim_random_bool(_ctx: *mut ElleCtx, _args: *const ElleValue, _nargs: usize) -> ElleResult {
     let a = api();
     a.ok(a.boolean(rng().lock().unwrap().random::<bool>()))
 }
 
-extern "C" fn prim_random_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_bytes(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let len = match a.get_int(arg0) {
         Some(n) if n >= 0 => n as usize,
         Some(_) => {
-            return a.err("range-error", "random/bytes: length must be non-negative");
+            return a.err(ctx, "range-error", "random/bytes: length must be non-negative");
         }
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("random/bytes: expected integer, got {}", a.type_name(arg0)),
             );
@@ -152,16 +152,16 @@ extern "C" fn prim_random_bytes(args: *const ElleValue, nargs: usize) -> ElleRes
     };
     let mut buf = vec![0u8; len];
     rng().lock().unwrap().fill(&mut buf[..]);
-    a.ok(a.bytes(&buf))
+    a.ok(a.bytes(ctx, &buf))
 }
 
-extern "C" fn prim_random_shuffle(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_shuffle(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let mut elements = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/shuffle: expected array or list, got {}",
@@ -171,16 +171,16 @@ extern "C" fn prim_random_shuffle(args: *const ElleValue, nargs: usize) -> ElleR
         }
     };
     elements.shuffle(&mut *rng().lock().unwrap());
-    a.ok(a.array(&elements))
+    a.ok(a.array(ctx, &elements))
 }
 
-extern "C" fn prim_random_choice(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_choice(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let elements = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/choice: expected array or list, got {}",
@@ -190,7 +190,7 @@ extern "C" fn prim_random_choice(args: *const ElleValue, nargs: usize) -> ElleRe
         }
     };
     if elements.is_empty() {
-        return a.err(
+        return a.err(ctx, 
             "range-error",
             "random/choice: cannot choose from empty collection",
         );
@@ -199,7 +199,7 @@ extern "C" fn prim_random_choice(args: *const ElleValue, nargs: usize) -> ElleRe
     a.ok(elements[idx])
 }
 
-extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_normal(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let (mean, stddev) = match nargs {
         0 => (0.0f64, 1.0f64),
@@ -208,7 +208,7 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
             let m = match extract_float(arg0) {
                 Some(f) => f,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!(
                             "random/normal: expected number for mean, got {}",
@@ -225,7 +225,7 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
             let m = match extract_float(arg0) {
                 Some(f) => f,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!(
                             "random/normal: expected number for mean, got {}",
@@ -237,7 +237,7 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
             let s = match extract_float(arg1) {
                 Some(f) => f,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!(
                             "random/normal: expected number for stddev, got {}",
@@ -251,7 +251,7 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
         _ => unreachable!("arity enforced by PRIMITIVES table"),
     };
     if stddev <= 0.0 {
-        return a.err("range-error", "random/normal: stddev must be positive");
+        return a.err(ctx, "range-error", "random/normal: stddev must be positive");
     }
     // Box-Muller transform
     let sample = {
@@ -267,7 +267,7 @@ extern "C" fn prim_random_normal(args: *const ElleValue, nargs: usize) -> ElleRe
     a.ok(a.float(sample))
 }
 
-extern "C" fn prim_random_exponential(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_exponential(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let lambda = match nargs {
         0 => 1.0f64,
@@ -276,7 +276,7 @@ extern "C" fn prim_random_exponential(args: *const ElleValue, nargs: usize) -> E
             match extract_float(arg0) {
                 Some(f) => f,
                 None => {
-                    return a.err(
+                    return a.err(ctx, 
                         "type-error",
                         &format!(
                             "random/exponential: expected number for lambda, got {}",
@@ -289,21 +289,21 @@ extern "C" fn prim_random_exponential(args: *const ElleValue, nargs: usize) -> E
         _ => unreachable!("arity enforced by PRIMITIVES table"),
     };
     if lambda <= 0.0 {
-        return a.err("range-error", "random/exponential: lambda must be positive");
+        return a.err(ctx, "range-error", "random/exponential: lambda must be positive");
     }
     let u: f64 = rng().lock().unwrap().random::<f64>();
     let sample = -(1.0 - u).ln() / lambda;
     a.ok(a.float(sample))
 }
 
-extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_weighted(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let arg1 = unsafe { a.arg(args, nargs, 1) };
     let items = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/weighted: expected array or list for items, got {}",
@@ -315,7 +315,7 @@ extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> Elle
     let weight_vals = match extract_elements(arg1) {
         Some(elems) => elems,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/weighted: expected array or list for weights, got {}",
@@ -325,10 +325,10 @@ extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> Elle
         }
     };
     if items.is_empty() {
-        return a.err("range-error", "random/weighted: items must not be empty");
+        return a.err(ctx, "range-error", "random/weighted: items must not be empty");
     }
     if items.len() != weight_vals.len() {
-        return a.err(
+        return a.err(ctx, 
             "range-error",
             &format!(
                 "random/weighted: items and weights must have equal length, got {} and {}",
@@ -343,7 +343,7 @@ extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> Elle
         let w = match extract_float(*wv) {
             Some(f) => f,
             None => {
-                return a.err(
+                return a.err(ctx, 
                     "type-error",
                     &format!(
                         "random/weighted: weight {} must be a number, got {}",
@@ -354,7 +354,7 @@ extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> Elle
             }
         };
         if w <= 0.0 {
-            return a.err(
+            return a.err(ctx, 
                 "range-error",
                 &format!("random/weighted: weight {} must be positive, got {}", i, w),
             );
@@ -374,19 +374,19 @@ extern "C" fn prim_random_weighted(args: *const ElleValue, nargs: usize) -> Elle
     a.ok(items[idx])
 }
 
-extern "C" fn prim_random_csprng_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_csprng_bytes(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let len = match a.get_int(arg0) {
         Some(n) if n >= 0 => n as usize,
         Some(_) => {
-            return a.err(
+            return a.err(ctx, 
                 "range-error",
                 "random/csprng-bytes: length must be non-negative",
             );
         }
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/csprng-bytes: expected integer, got {}",
@@ -397,17 +397,17 @@ extern "C" fn prim_random_csprng_bytes(args: *const ElleValue, nargs: usize) -> 
     };
     let mut buf = vec![0u8; len];
     csprng().lock().unwrap().fill(&mut buf[..]);
-    a.ok(a.bytes(&buf))
+    a.ok(a.bytes(ctx, &buf))
 }
 
-extern "C" fn prim_random_csprng_seed(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_csprng_seed(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     // Extract bytes from bytes value
     let data: Vec<u8> = if let Some(b) = a.get_bytes(arg0) {
         b.to_vec()
     } else {
-        return a.err(
+        return a.err(ctx, 
             "type-error",
             &format!(
                 "random/csprng-seed: expected bytes, got {}",
@@ -416,7 +416,7 @@ extern "C" fn prim_random_csprng_seed(args: *const ElleValue, nargs: usize) -> E
         );
     };
     if data.len() != 32 {
-        return a.err(
+        return a.err(ctx, 
             "range-error",
             &format!(
                 "random/csprng-seed: expected exactly 32 bytes, got {}",
@@ -430,14 +430,14 @@ extern "C" fn prim_random_csprng_seed(args: *const ElleValue, nargs: usize) -> E
     a.ok(a.nil())
 }
 
-extern "C" fn prim_random_sample(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_random_sample(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let arg1 = unsafe { a.arg(args, nargs, 1) };
     let elements = match extract_elements(arg0) {
         Some(elems) => elems,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/sample: expected array or list, got {}",
@@ -449,7 +449,7 @@ extern "C" fn prim_random_sample(args: *const ElleValue, nargs: usize) -> ElleRe
     let n = match a.get_int(arg1) {
         Some(i) => i,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "random/sample: expected integer for n, got {}",
@@ -459,7 +459,7 @@ extern "C" fn prim_random_sample(args: *const ElleValue, nargs: usize) -> ElleRe
         }
     };
     if n < 0 || n as usize > elements.len() {
-        return a.err(
+        return a.err(ctx, 
             "range-error",
             &format!(
                 "random/sample: n must be between 0 and {} (collection length), got {}",
@@ -479,7 +479,7 @@ extern "C" fn prim_random_sample(args: *const ElleValue, nargs: usize) -> ElleRe
         }
     }
     pool.truncate(n);
-    a.ok(a.array(&pool))
+    a.ok(a.array(ctx, &pool))
 }
 
 // ---------------------------------------------------------------------------
