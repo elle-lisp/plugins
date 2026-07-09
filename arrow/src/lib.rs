@@ -13,7 +13,7 @@ use arrow::util::pretty::pretty_format_batches;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 // ---------------------------------------------------------------------------
 // Type wrappers
@@ -26,22 +26,22 @@ struct BatchWrap(RecordBatch);
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn get_batch<'a>(val: ElleValue, name: &str) -> Result<&'a BatchWrap, ElleResult> {
+fn get_batch<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a BatchWrap, ElleResult> {
     let a = api();
     a.get_external::<BatchWrap>(val, "arrow/batch").ok_or_else(|| {
-        a.err(
+        a.err(ctx, 
             "type-error",
             &format!("{}: expected arrow/batch, got {}", name, a.type_name(val)),
         )
     })
 }
 
-fn extract_string(val: ElleValue, name: &str) -> Result<String, ElleResult> {
+fn extract_string(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<String, ElleResult> {
     let a = api();
     a.get_string(val)
         .map(|s| s.to_owned())
         .ok_or_else(|| {
-            a.err(
+            a.err(ctx, 
                 "type-error",
                 &format!("{}: expected string, got {}", name, a.type_name(val)),
             )
@@ -90,7 +90,7 @@ fn elle_values_to_arrow(
 }
 
 /// Convert an Arrow array to a Vec<ElleValue>.
-fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
+fn arrow_to_elle_values(ctx: *mut ElleCtx, arr: &dyn Array) -> Vec<ElleValue> {
     let a = api();
     let len = arr.len();
     let mut out = Vec::with_capacity(len);
@@ -109,7 +109,7 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
                             let ia = c.as_any().downcast_ref::<Int64Array>().unwrap();
                             out.push(a.int(ia.value(i)));
                         } else {
-                            out.push(a.string(&format!("{:?}", arr)));
+                            out.push(a.string(ctx, &format!("{:?}", arr)));
                         }
                     }
                 }
@@ -119,7 +119,7 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
                         let ia = c.as_any().downcast_ref::<Int64Array>().unwrap();
                         out.push(a.int(ia.value(i)));
                     } else {
-                        out.push(a.string("<arrow-value>"));
+                        out.push(a.string(ctx, "<arrow-value>"));
                     }
                 }
                 DataType::Float16 | DataType::Float32 | DataType::Float64 => {
@@ -128,7 +128,7 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
                         let fa = c.as_any().downcast_ref::<Float64Array>().unwrap();
                         out.push(a.float(fa.value(i)));
                     } else {
-                        out.push(a.string("<arrow-value>"));
+                        out.push(a.string(ctx, "<arrow-value>"));
                     }
                 }
                 DataType::Boolean => {
@@ -138,9 +138,9 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
                 DataType::Utf8 | DataType::LargeUtf8 => {
                     let sa = arr.as_any().downcast_ref::<StringArray>();
                     if let Some(sa) = sa {
-                        out.push(a.string(sa.value(i)));
+                        out.push(a.string(ctx, sa.value(i)));
                     } else {
-                        out.push(a.string(""));
+                        out.push(a.string(ctx, ""));
                     }
                 }
                 _ => {
@@ -148,9 +148,9 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
                     let formatted =
                         arrow::util::display::ArrayFormatter::try_new(arr, &Default::default());
                     if let Ok(f) = formatted {
-                        out.push(a.string(&f.value(i).to_string()));
+                        out.push(a.string(ctx, &f.value(i).to_string()));
                     } else {
-                        out.push(a.string("<arrow-value>"));
+                        out.push(a.string(ctx, "<arrow-value>"));
                     }
                 }
             }
@@ -160,7 +160,7 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<ElleValue> {
 }
 
 /// Convert a RecordBatch to an Elle array of structs.
-fn batch_to_elle(batch: &RecordBatch) -> ElleValue {
+fn batch_to_elle(ctx: *mut ElleCtx, batch: &RecordBatch) -> ElleValue {
     let a = api();
     let schema = batch.schema();
     let num_rows = batch.num_rows();
@@ -170,7 +170,7 @@ fn batch_to_elle(batch: &RecordBatch) -> ElleValue {
     let columns: Vec<Vec<ElleValue>> = batch
         .columns()
         .iter()
-        .map(|col| arrow_to_elle_values(col.as_ref()))
+        .map(|col| arrow_to_elle_values(ctx, col.as_ref()))
         .collect();
 
     // Collect field names as owned strings
@@ -182,9 +182,9 @@ fn batch_to_elle(batch: &RecordBatch) -> ElleValue {
             .zip(columns.iter())
             .map(|(name, col_vals)| (name.as_str(), col_vals[row_idx]))
             .collect();
-        rows.push(a.build_struct(&fields));
+        rows.push(a.build_struct(ctx, &fields));
     }
-    a.array(&rows)
+    a.array(ctx, &rows)
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ elle_plugin::define_plugin!("arrow/", &PRIMITIVES);
 
 /// (arrow/batch columns) — create a RecordBatch from column specifications.
 /// Accepts an array of [column-name column-data] pairs.
-extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_batch(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/batch";
     let arg0 = unsafe { a.arg(args, nargs, 0) };
@@ -208,7 +208,7 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
     let arr_len = match a.get_array_len(arg0) {
         Some(l) => l,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("{}: expected array of [column-name column-data] pairs", name),
             );
@@ -221,14 +221,14 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
         let plen = match a.get_array_len(pair) {
             Some(l) => l,
             None => {
-                return a.err(
+                return a.err(ctx, 
                     "arrow-error",
                     &format!("{}: each column must be a [name data] pair", name),
                 );
             }
         };
         if plen < 2 {
-            return a.err(
+            return a.err(ctx, 
                 "arrow-error",
                 &format!("{}: each column pair must have [name data]", name),
             );
@@ -241,7 +241,7 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
         {
             Some(s) => s.to_string(),
             None => {
-                return a.err(
+                return a.err(ctx, 
                     "arrow-error",
                     &format!("{}: column name must be string or keyword", name),
                 );
@@ -250,7 +250,7 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
         let data_len = match a.get_array_len(col_data_val) {
             Some(l) => l,
             None => {
-                return a.err(
+                return a.err(ctx, 
                     "arrow-error",
                     &format!("{}: column data must be an array", name),
                 );
@@ -264,7 +264,7 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
     }
 
     if columns.is_empty() {
-        return a.err("arrow-error", &format!("{}: no columns provided", name));
+        return a.err(ctx, "arrow-error", &format!("{}: no columns provided", name));
     }
 
     let mut fields = Vec::new();
@@ -277,23 +277,23 @@ extern "C" fn prim_batch(args: *const ElleValue, nargs: usize) -> ElleResult {
                 arrays.push(arr);
             }
             Err(e) => {
-                return a.err("arrow-error", &format!("{}: {}", name, e));
+                return a.err(ctx, "arrow-error", &format!("{}: {}", name, e));
             }
         }
     }
 
     let schema = Arc::new(Schema::new(fields));
     match RecordBatch::try_new(schema, arrays) {
-        Ok(batch) => a.ok(a.external("arrow/batch", BatchWrap(batch))),
-        Err(e) => a.err("arrow-error", &format!("{}: {}", name, e)),
+        Ok(batch) => a.ok(a.external(ctx, "arrow/batch", BatchWrap(batch))),
+        Err(e) => a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
     }
 }
 
 /// (arrow/schema batch) — return the schema of a batch as a struct.
-extern "C" fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_schema(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/schema";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -307,16 +307,16 @@ extern "C" fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
     let fields: Vec<(&str, ElleValue)> = field_names
         .iter()
         .zip(type_strs.iter())
-        .map(|(name, tstr)| (name.as_str(), a.string(tstr)))
+        .map(|(name, tstr)| (name.as_str(), a.string(ctx, tstr)))
         .collect();
-    a.ok(a.build_struct(&fields))
+    a.ok(a.build_struct(ctx, &fields))
 }
 
 /// (arrow/num-rows batch) — return number of rows.
-extern "C" fn prim_num_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_num_rows(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/num-rows";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -324,10 +324,10 @@ extern "C" fn prim_num_rows(args: *const ElleValue, nargs: usize) -> ElleResult 
 }
 
 /// (arrow/num-cols batch) — return number of columns.
-extern "C" fn prim_num_cols(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_num_cols(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/num-cols";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -335,14 +335,14 @@ extern "C" fn prim_num_cols(args: *const ElleValue, nargs: usize) -> ElleResult 
 }
 
 /// (arrow/column batch col-name) — extract a column as an Elle array.
-extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_column(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/column";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
-    let col_name = match extract_string(unsafe { a.arg(args, nargs, 1) }, name) {
+    let col_name = match extract_string(ctx, unsafe { a.arg(args, nargs, 1) }, name) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -350,10 +350,10 @@ extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
     match schema.index_of(&col_name) {
         Ok(idx) => {
             let col = batch.0.column(idx);
-            let values = arrow_to_elle_values(col.as_ref());
-            a.ok(a.array(&values))
+            let values = arrow_to_elle_values(ctx, col.as_ref());
+            a.ok(a.array(ctx, &values))
         }
-        Err(_) => a.err(
+        Err(_) => a.err(ctx, 
             "arrow-error",
             &format!("{}: column '{}' not found", name, col_name),
         ),
@@ -361,35 +361,35 @@ extern "C" fn prim_column(args: *const ElleValue, nargs: usize) -> ElleResult {
 }
 
 /// (arrow/to-rows batch) — convert a RecordBatch to an Elle array of structs.
-extern "C" fn prim_to_rows(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_to_rows(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/to-rows";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
-    a.ok(batch_to_elle(&batch.0))
+    a.ok(batch_to_elle(ctx, &batch.0))
 }
 
 /// (arrow/display batch) — pretty-print a RecordBatch as a table string.
-extern "C" fn prim_display(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_display(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/display";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
     match pretty_format_batches(std::slice::from_ref(&batch.0)) {
-        Ok(table) => a.ok(a.string(&table.to_string())),
-        Err(e) => a.err("arrow-error", &format!("{}: {}", name, e)),
+        Ok(table) => a.ok(a.string(ctx, &table.to_string())),
+        Err(e) => a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
     }
 }
 
 /// (arrow/write-ipc batch) — serialize a RecordBatch to IPC bytes.
-extern "C" fn prim_write_ipc(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_write_ipc(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/write-ipc";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -398,26 +398,26 @@ extern "C" fn prim_write_ipc(args: *const ElleValue, nargs: usize) -> ElleResult
     let schema = batch.0.schema();
     let mut writer = match StreamWriter::try_new(&mut buf, &schema) {
         Ok(w) => w,
-        Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+        Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
     };
     if let Err(e) = writer.write(&batch.0) {
-        return a.err("arrow-error", &format!("{}: {}", name, e));
+        return a.err(ctx, "arrow-error", &format!("{}: {}", name, e));
     }
     if let Err(e) = writer.finish() {
-        return a.err("arrow-error", &format!("{}: {}", name, e));
+        return a.err(ctx, "arrow-error", &format!("{}: {}", name, e));
     }
-    a.ok(a.bytes(&buf))
+    a.ok(a.bytes(ctx, &buf))
 }
 
 /// (arrow/read-ipc bytes) — deserialize IPC bytes to a RecordBatch.
-extern "C" fn prim_read_ipc(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_read_ipc(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/read-ipc";
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let bytes = match a.get_bytes(arg0) {
         Some(b) => b,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("{}: expected bytes, got {}", name, a.type_name(arg0)),
             );
@@ -427,36 +427,36 @@ extern "C" fn prim_read_ipc(args: *const ElleValue, nargs: usize) -> ElleResult 
     let cursor = Cursor::new(bytes.to_vec());
     let reader = match StreamReader::try_new(cursor, None) {
         Ok(r) => r,
-        Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+        Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
     };
 
     let mut batches = Vec::new();
     for batch_result in reader {
         match batch_result {
             Ok(batch) => batches.push(batch),
-            Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+            Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
         }
     }
 
     if batches.len() == 1 {
-        a.ok(a.external(
+        a.ok(a.external(ctx, 
             "arrow/batch",
             BatchWrap(batches.into_iter().next().unwrap()),
         ))
     } else {
         let vals: Vec<ElleValue> = batches
             .into_iter()
-            .map(|b| a.external("arrow/batch", BatchWrap(b)))
+            .map(|b| a.external(ctx, "arrow/batch", BatchWrap(b)))
             .collect();
-        a.ok(a.array(&vals))
+        a.ok(a.array(ctx, &vals))
     }
 }
 
 /// (arrow/write-parquet batch) — serialize a RecordBatch to Parquet bytes.
-extern "C" fn prim_write_parquet(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_write_parquet(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/write-parquet";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -465,26 +465,26 @@ extern "C" fn prim_write_parquet(args: *const ElleValue, nargs: usize) -> ElleRe
     let schema = batch.0.schema();
     let mut writer = match ArrowWriter::try_new(&mut buf, schema, None) {
         Ok(w) => w,
-        Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+        Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
     };
     if let Err(e) = writer.write(&batch.0) {
-        return a.err("arrow-error", &format!("{}: {}", name, e));
+        return a.err(ctx, "arrow-error", &format!("{}: {}", name, e));
     }
     if let Err(e) = writer.close() {
-        return a.err("arrow-error", &format!("{}: {}", name, e));
+        return a.err(ctx, "arrow-error", &format!("{}: {}", name, e));
     }
-    a.ok(a.bytes(&buf))
+    a.ok(a.bytes(ctx, &buf))
 }
 
 /// (arrow/read-parquet bytes) — deserialize Parquet bytes to a RecordBatch.
-extern "C" fn prim_read_parquet(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_read_parquet(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/read-parquet";
     let arg0 = unsafe { a.arg(args, nargs, 0) };
     let raw_bytes = match a.get_bytes(arg0) {
         Some(b) => b,
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!("{}: expected bytes, got {}", name, a.type_name(arg0)),
             );
@@ -494,59 +494,59 @@ extern "C" fn prim_read_parquet(args: *const ElleValue, nargs: usize) -> ElleRes
     let builder =
         match ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(raw_bytes.to_vec())) {
             Ok(b) => b,
-            Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+            Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
         };
     let reader = match builder.build() {
         Ok(r) => r,
-        Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+        Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
     };
 
     let mut batches = Vec::new();
     for batch_result in reader {
         match batch_result {
             Ok(batch) => batches.push(batch),
-            Err(e) => return a.err("arrow-error", &format!("{}: {}", name, e)),
+            Err(e) => return a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
         }
     }
 
     if batches.is_empty() {
-        return a.err("arrow-error", &format!("{}: no data in parquet", name));
+        return a.err(ctx, "arrow-error", &format!("{}: no data in parquet", name));
     }
 
     // Concatenate all batches
     if batches.len() == 1 {
-        a.ok(a.external(
+        a.ok(a.external(ctx, 
             "arrow/batch",
             BatchWrap(batches.into_iter().next().unwrap()),
         ))
     } else {
         let schema = batches[0].schema();
         match arrow::compute::concat_batches(&schema, &batches) {
-            Ok(merged) => a.ok(a.external("arrow/batch", BatchWrap(merged))),
-            Err(e) => a.err("arrow-error", &format!("{}: {}", name, e)),
+            Ok(merged) => a.ok(a.external(ctx, "arrow/batch", BatchWrap(merged))),
+            Err(e) => a.err(ctx, "arrow-error", &format!("{}: {}", name, e)),
         }
     }
 }
 
 /// (arrow/slice batch offset length) — take a zero-copy slice of a batch.
-extern "C" fn prim_slice(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_slice(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "arrow/slice";
-    let batch = match get_batch(unsafe { a.arg(args, nargs, 0) }, name) {
+    let batch = match get_batch(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(b) => b,
         Err(e) => return e,
     };
     let offset = match a.get_int(unsafe { a.arg(args, nargs, 1) }) {
         Some(o) => o as usize,
-        None => return a.err("type-error", &format!("{}: offset must be integer", name)),
+        None => return a.err(ctx, "type-error", &format!("{}: offset must be integer", name)),
     };
     let length = match a.get_int(unsafe { a.arg(args, nargs, 2) }) {
         Some(l) => l as usize,
-        None => return a.err("type-error", &format!("{}: length must be integer", name)),
+        None => return a.err(ctx, "type-error", &format!("{}: length must be integer", name)),
     };
 
     let sliced = batch.0.slice(offset, length);
-    a.ok(a.external("arrow/batch", BatchWrap(sliced)))
+    a.ok(a.external(ctx, "arrow/batch", BatchWrap(sliced)))
 }
 
 // ---------------------------------------------------------------------------
