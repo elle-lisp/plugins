@@ -1,6 +1,6 @@
 //! Elle protobuf plugin — dynamic protobuf encode/decode via descriptor pools.
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("protobuf/", &PRIMITIVES);
 
@@ -12,32 +12,32 @@ mod schema;
 // Primitive wrappers
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
-    schema::prim_schema(args, nargs)
+extern "C" fn prim_schema(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    schema::prim_schema(ctx, args, nargs)
 }
 
-extern "C" fn prim_schema_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
-    schema::prim_schema_bytes(args, nargs)
+extern "C" fn prim_schema_bytes(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    schema::prim_schema_bytes(ctx, args, nargs)
 }
 
-extern "C" fn prim_encode(args: *const ElleValue, nargs: usize) -> ElleResult {
-    convert::encode(args, nargs)
+extern "C" fn prim_encode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    convert::encode(ctx, args, nargs)
 }
 
-extern "C" fn prim_decode(args: *const ElleValue, nargs: usize) -> ElleResult {
-    convert::decode(args, nargs)
+extern "C" fn prim_decode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    convert::decode(ctx, args, nargs)
 }
 
-extern "C" fn prim_messages(args: *const ElleValue, nargs: usize) -> ElleResult {
-    inspect::prim_messages(args, nargs)
+extern "C" fn prim_messages(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    inspect::prim_messages(ctx, args, nargs)
 }
 
-extern "C" fn prim_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
-    inspect::prim_fields(args, nargs)
+extern "C" fn prim_fields(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    inspect::prim_fields(ctx, args, nargs)
 }
 
-extern "C" fn prim_enums(args: *const ElleValue, nargs: usize) -> ElleResult {
-    inspect::prim_enums(args, nargs)
+extern "C" fn prim_enums(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    inspect::prim_enums(ctx, args, nargs)
 }
 
 // ---------------------------------------------------------------------------

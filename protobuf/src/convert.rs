@@ -6,14 +6,14 @@ use prost_reflect::{
     DynamicMessage, FieldDescriptor, Kind, MapKey, ReflectMessage, Value as PbValue,
 };
 
-use elle_plugin::{ElleResult, ElleValue};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue};
 
 // ---------------------------------------------------------------------------
 // Elle -> Protobuf (encode)
 // ---------------------------------------------------------------------------
 
 /// Convert an Elle `ElleValue` to a `prost_reflect::Value` for the given field.
-fn elle_to_pb(val: ElleValue, field: &FieldDescriptor) -> Result<PbValue, String> {
+fn elle_to_pb(ctx: *mut ElleCtx, val: ElleValue, field: &FieldDescriptor) -> Result<PbValue, String> {
     let a = crate::api();
 
     if a.check_nil(val) {
@@ -91,7 +91,7 @@ fn elle_to_pb(val: ElleValue, field: &FieldDescriptor) -> Result<PbValue, String
                     field.name()
                 ))
             } else {
-                let dyn_msg = encode_message(val, &msg_desc)?;
+                let dyn_msg = encode_message(ctx, val, &msg_desc)?;
                 Ok(PbValue::Message(dyn_msg))
             }
         }
@@ -103,6 +103,7 @@ fn elle_to_pb(val: ElleValue, field: &FieldDescriptor) -> Result<PbValue, String
 /// Uses the message descriptor's field list to look up fields via struct_get.
 /// Map fields are encoded by iterating the struct's entries via `struct_entries`.
 fn encode_message(
+    ctx: *mut ElleCtx,
     val: ElleValue,
     msg_desc: &prost_reflect::MessageDescriptor,
 ) -> Result<DynamicMessage, String> {
@@ -124,13 +125,13 @@ fn encode_message(
         }
 
         if field_desc.is_map() {
-            let pb_map = encode_map(field_val, &field_desc)?;
+            let pb_map = encode_map(ctx, field_val, &field_desc)?;
             msg.set_field(&field_desc, PbValue::Map(pb_map));
         } else if field_desc.is_list() {
-            let pb_list = encode_repeated(field_val, &field_desc)?;
+            let pb_list = encode_repeated(ctx, field_val, &field_desc)?;
             msg.set_field(&field_desc, PbValue::List(pb_list));
         } else {
-            let pb_val = elle_to_pb(field_val, &field_desc)
+            let pb_val = elle_to_pb(ctx, field_val, &field_desc)
                 .map_err(|e| format!("field '{}': {}", field_name, e))?;
             msg.set_field(&field_desc, pb_val);
         }
@@ -140,12 +141,12 @@ fn encode_message(
 }
 
 /// Encode an Elle array into a repeated protobuf list.
-fn encode_repeated(val: ElleValue, field: &FieldDescriptor) -> Result<Vec<PbValue>, String> {
+fn encode_repeated(ctx: *mut ElleCtx, val: ElleValue, field: &FieldDescriptor) -> Result<Vec<PbValue>, String> {
     let a = crate::api();
     // Accept arrays directly, or convert lists (cons chains) to arrays.
     let (arr, arr_len) = if let Some(len) = a.get_array_len(val) {
         (val, len)
-    } else if let Some(converted) = a.list_to_array(val) {
+    } else if let Some(converted) = a.list_to_array(ctx, val) {
         let len = a.get_array_len(converted).unwrap_or(0);
         (converted, len)
     } else {
@@ -164,10 +165,10 @@ fn encode_repeated(val: ElleValue, field: &FieldDescriptor) -> Result<Vec<PbValu
         }
         let pb_val = match field.kind() {
             Kind::Message(msg_desc) => {
-                let dyn_msg = encode_message(item, &msg_desc)?;
+                let dyn_msg = encode_message(ctx, item, &msg_desc)?;
                 PbValue::Message(dyn_msg)
             }
-            _ => elle_to_pb(item, field)?,
+            _ => elle_to_pb(ctx, item, field)?,
         };
         result.push(pb_val);
     }
@@ -180,6 +181,7 @@ fn encode_repeated(val: ElleValue, field: &FieldDescriptor) -> Result<Vec<PbValu
 /// each pair into a `(MapKey, PbValue)` entry matching the map field's
 /// key/value types.
 fn encode_map(
+    ctx: *mut ElleCtx,
     val: ElleValue,
     field: &FieldDescriptor,
 ) -> Result<HashMap<MapKey, PbValue>, String> {
@@ -275,7 +277,7 @@ fn encode_map(
             }
         };
 
-        let pb_val = elle_to_pb(entry_val, &value_field)
+        let pb_val = elle_to_pb(ctx, entry_val, &value_field)
             .map_err(|e| format!("field '{}', key '{}': {}", field.name(), key_str, e))?;
         result.insert(map_key, pb_val);
     }
@@ -287,7 +289,7 @@ fn encode_map(
 // Protobuf -> Elle (decode)
 // ---------------------------------------------------------------------------
 
-fn pb_to_elle(val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, String> {
+fn pb_to_elle(ctx: *mut ElleCtx, val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, String> {
     let a = crate::api();
     match val {
         PbValue::Bool(b) => Ok(a.boolean(*b)),
@@ -307,8 +309,8 @@ fn pb_to_elle(val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, Strin
         }
         PbValue::F32(f) => Ok(a.float(*f as f64)),
         PbValue::F64(f) => Ok(a.float(*f)),
-        PbValue::String(s) => Ok(a.string(s.as_str())),
-        PbValue::Bytes(b) => Ok(a.bytes(b.as_ref())),
+        PbValue::String(s) => Ok(a.string(ctx, s.as_str())),
+        PbValue::Bytes(b) => Ok(a.bytes(ctx, b.as_ref())),
         PbValue::EnumNumber(n) => {
             let enum_desc = match field.kind() {
                 Kind::Enum(e) => e,
@@ -324,18 +326,18 @@ fn pb_to_elle(val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, Strin
                 None => Ok(a.int(*n as i64)),
             }
         }
-        PbValue::Message(dyn_msg) => decode_message(dyn_msg),
+        PbValue::Message(dyn_msg) => decode_message(ctx, dyn_msg),
         PbValue::List(items) => {
             let element_vals: Result<Vec<ElleValue>, String> =
-                items.iter().map(|item| pb_to_elle(item, field)).collect();
+                items.iter().map(|item| pb_to_elle(ctx, item, field)).collect();
             let elems = element_vals?;
-            Ok(a.array(&elems))
+            Ok(a.array(ctx, &elems))
         }
-        PbValue::Map(map) => decode_map(map, field),
+        PbValue::Map(map) => decode_map(ctx, map, field),
     }
 }
 
-fn decode_message(msg: &DynamicMessage) -> Result<ElleValue, String> {
+fn decode_message(ctx: *mut ElleCtx, msg: &DynamicMessage) -> Result<ElleValue, String> {
     let a = crate::api();
     let mut fields: Vec<(String, ElleValue)> = Vec::new();
 
@@ -346,28 +348,28 @@ fn decode_message(msg: &DynamicMessage) -> Result<ElleValue, String> {
 
         let pb_val = msg.get_field(&field);
         let elle_val = if field.is_map() {
-            decode_map_field(pb_val.as_ref(), &field)?
+            decode_map_field(ctx, pb_val.as_ref(), &field)?
         } else if field.is_list() {
-            decode_list_field(pb_val.as_ref(), &field)?
+            decode_list_field(ctx, pb_val.as_ref(), &field)?
         } else {
-            pb_to_elle(pb_val.as_ref(), &field)?
+            pb_to_elle(ctx, pb_val.as_ref(), &field)?
         };
 
         fields.push((field.name().to_string(), elle_val));
     }
 
     let kvs: Vec<(&str, ElleValue)> = fields.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-    Ok(a.build_struct(&kvs))
+    Ok(a.build_struct(ctx, &kvs))
 }
 
-fn decode_map_field(val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, String> {
+fn decode_map_field(ctx: *mut ElleCtx, val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, String> {
     match val {
-        PbValue::Map(map) => decode_map(map, field),
+        PbValue::Map(map) => decode_map(ctx, map, field),
         _ => Err(format!("field '{}': expected Map, got {:?}", field.name(), val)),
     }
 }
 
-fn decode_map(map: &HashMap<MapKey, PbValue>, field: &FieldDescriptor) -> Result<ElleValue, String> {
+fn decode_map(ctx: *mut ElleCtx, map: &HashMap<MapKey, PbValue>, field: &FieldDescriptor) -> Result<ElleValue, String> {
     let a = crate::api();
     let msg_desc = match field.kind() {
         Kind::Message(d) => d,
@@ -388,22 +390,22 @@ fn decode_map(map: &HashMap<MapKey, PbValue>, field: &FieldDescriptor) -> Result
             MapKey::U32(n) => n.to_string(),
             MapKey::U64(n) => n.to_string(),
         };
-        let elle_val = pb_to_elle(v, &value_field)?;
+        let elle_val = pb_to_elle(ctx, v, &value_field)?;
         result.push((key_str, elle_val));
     }
 
     let kvs: Vec<(&str, ElleValue)> = result.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-    Ok(a.build_struct(&kvs))
+    Ok(a.build_struct(ctx, &kvs))
 }
 
-fn decode_list_field(val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, String> {
+fn decode_list_field(ctx: *mut ElleCtx, val: &PbValue, field: &FieldDescriptor) -> Result<ElleValue, String> {
     let a = crate::api();
     match val {
         PbValue::List(items) => {
             let element_vals: Result<Vec<ElleValue>, String> =
-                items.iter().map(|item| pb_to_elle(item, field)).collect();
+                items.iter().map(|item| pb_to_elle(ctx, item, field)).collect();
             let elems = element_vals?;
-            Ok(a.array(&elems))
+            Ok(a.array(ctx, &elems))
         }
         _ => Err(format!("field '{}': expected List, got {:?}", field.name(), val)),
     }
@@ -489,11 +491,11 @@ fn elle_to_bytes(val: ElleValue) -> Result<Vec<u8>, String> {
 // Encode/decode primitives (called from lib.rs)
 // ---------------------------------------------------------------------------
 
-pub fn encode(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn encode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/encode";
 
-    let pool = match crate::schema::get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
+    let pool = match crate::schema::get_pool(ctx, unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -502,37 +504,37 @@ pub fn encode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let msg_name = match a.get_string(msg_name_val) {
         Some(s) => s.to_string(),
         None => {
-            return a.err("type-error", &format!("{}: message name must be a string, got {}", PRIM, a.type_name(msg_name_val)));
+            return a.err(ctx, "type-error", &format!("{}: message name must be a string, got {}", PRIM, a.type_name(msg_name_val)));
         }
     };
 
     let struct_val = unsafe { a.arg(args, nargs, 2) };
     if !a.check_struct(struct_val) {
-        return a.err("type-error", &format!("{}: expected struct, got {}", PRIM, a.type_name(struct_val)));
+        return a.err(ctx, "type-error", &format!("{}: expected struct, got {}", PRIM, a.type_name(struct_val)));
     }
 
     let msg_desc = match pool.get_message_by_name(&msg_name) {
         Some(d) => d,
         None => {
-            return a.err("protobuf-error", &format!("{}: message '{}' not found in pool", PRIM, msg_name));
+            return a.err(ctx, "protobuf-error", &format!("{}: message '{}' not found in pool", PRIM, msg_name));
         }
     };
 
-    match encode_message(struct_val, &msg_desc) {
+    match encode_message(ctx, struct_val, &msg_desc) {
         Ok(dyn_msg) => {
             use prost::Message;
             let encoded = dyn_msg.encode_to_vec();
-            a.ok(a.bytes(&encoded))
+            a.ok(a.bytes(ctx, &encoded))
         }
-        Err(e) => a.err("protobuf-error", &format!("{}: {}", PRIM, e)),
+        Err(e) => a.err(ctx, "protobuf-error", &format!("{}: {}", PRIM, e)),
     }
 }
 
-pub fn decode(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn decode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/decode";
 
-    let pool = match crate::schema::get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
+    let pool = match crate::schema::get_pool(ctx, unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -541,12 +543,12 @@ pub fn decode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let msg_name = match a.get_string(msg_name_val) {
         Some(s) => s.to_string(),
         None => {
-            return a.err("type-error", &format!("{}: message name must be a string, got {}", PRIM, a.type_name(msg_name_val)));
+            return a.err(ctx, "type-error", &format!("{}: message name must be a string, got {}", PRIM, a.type_name(msg_name_val)));
         }
     };
 
     let bytes_val = unsafe { a.arg(args, nargs, 2) };
-    let bytes = match crate::schema::extract_bytes(bytes_val, PRIM) {
+    let bytes = match crate::schema::extract_bytes(ctx, bytes_val, PRIM) {
         Ok(b) => b,
         Err(e) => return e,
     };
@@ -554,15 +556,15 @@ pub fn decode(args: *const ElleValue, nargs: usize) -> ElleResult {
     let msg_desc = match pool.get_message_by_name(&msg_name) {
         Some(d) => d,
         None => {
-            return a.err("protobuf-error", &format!("{}: message '{}' not found in pool", PRIM, msg_name));
+            return a.err(ctx, "protobuf-error", &format!("{}: message '{}' not found in pool", PRIM, msg_name));
         }
     };
 
     match DynamicMessage::decode(msg_desc, bytes.as_slice()) {
-        Ok(dyn_msg) => match decode_message(&dyn_msg) {
+        Ok(dyn_msg) => match decode_message(ctx, &dyn_msg) {
             Ok(struct_val) => a.ok(struct_val),
-            Err(e) => a.err("protobuf-error", &format!("{}: {}", PRIM, e)),
+            Err(e) => a.err(ctx, "protobuf-error", &format!("{}: {}", PRIM, e)),
         },
-        Err(e) => a.err("protobuf-error", &format!("{}: {}", PRIM, e)),
+        Err(e) => a.err(ctx, "protobuf-error", &format!("{}: {}", PRIM, e)),
     }
 }

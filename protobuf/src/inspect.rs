@@ -2,7 +2,7 @@
 
 use prost_reflect::Kind;
 
-use elle_plugin::{ElleResult, ElleValue};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue};
 
 use crate::schema::get_pool;
 
@@ -10,32 +10,32 @@ use crate::schema::get_pool;
 // protobuf/messages
 // ---------------------------------------------------------------------------
 
-pub fn prim_messages(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn prim_messages(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/messages";
 
-    let pool = match get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
+    let pool = match get_pool(ctx, unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
 
     let names: Vec<ElleValue> = pool
         .all_messages()
-        .map(|desc| a.string(desc.full_name()))
+        .map(|desc| a.string(ctx, desc.full_name()))
         .collect();
 
-    a.ok(a.array(&names))
+    a.ok(a.array(ctx, &names))
 }
 
 // ---------------------------------------------------------------------------
 // protobuf/fields
 // ---------------------------------------------------------------------------
 
-pub fn prim_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn prim_fields(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/fields";
 
-    let pool = match get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
+    let pool = match get_pool(ctx, unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -44,14 +44,14 @@ pub fn prim_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
     let msg_name = match a.get_string(msg_name_val) {
         Some(s) => s.to_string(),
         None => {
-            return a.err("type-error", &format!("{}: message name must be a string, got {}", PRIM, a.type_name(msg_name_val)));
+            return a.err(ctx, "type-error", &format!("{}: message name must be a string, got {}", PRIM, a.type_name(msg_name_val)));
         }
     };
 
     let msg_desc = match pool.get_message_by_name(&msg_name) {
         Some(d) => d,
         None => {
-            return a.err("protobuf-error", &format!("{}: message '{}' not found in pool", PRIM, msg_name));
+            return a.err(ctx, "protobuf-error", &format!("{}: message '{}' not found in pool", PRIM, msg_name));
         }
     };
 
@@ -62,7 +62,7 @@ pub fn prim_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
             let label_kw = if f.is_list() { "repeated" } else { "optional" };
 
             let mut kvs: Vec<(&str, ElleValue)> = vec![
-                ("name", a.string(f.name())),
+                ("name", a.string(ctx, f.name())),
                 ("number", a.int(f.number() as i64)),
                 ("type", a.keyword(type_kw)),
                 ("label", a.keyword(label_kw)),
@@ -77,25 +77,25 @@ pub fn prim_fields(args: *const ElleValue, nargs: usize) -> ElleResult {
             let mt_string;
             if let Some(mt) = message_type_opt {
                 mt_string = mt;
-                kvs.push(("message-type", a.string(&mt_string)));
+                kvs.push(("message-type", a.string(ctx, &mt_string)));
             }
 
-            a.build_struct(&kvs)
+            a.build_struct(ctx, &kvs)
         })
         .collect();
 
-    a.ok(a.array(&field_structs))
+    a.ok(a.array(ctx, &field_structs))
 }
 
 // ---------------------------------------------------------------------------
 // protobuf/enums
 // ---------------------------------------------------------------------------
 
-pub fn prim_enums(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn prim_enums(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/enums";
 
-    let pool = match get_pool(unsafe { a.arg(args, nargs, 0) }, PRIM) {
+    let pool = match get_pool(ctx, unsafe { a.arg(args, nargs, 0) }, PRIM) {
         Ok(p) => p,
         Err(e) => return e,
     };
@@ -106,21 +106,21 @@ pub fn prim_enums(args: *const ElleValue, nargs: usize) -> ElleResult {
             let values: Vec<ElleValue> = e_desc
                 .values()
                 .map(|v| {
-                    a.build_struct(&[
-                        ("name", a.string(v.name())),
+                    a.build_struct(ctx, &[
+                        ("name", a.string(ctx, v.name())),
                         ("number", a.int(v.number() as i64)),
                     ])
                 })
                 .collect();
 
-            a.build_struct(&[
-                ("name", a.string(e_desc.full_name())),
-                ("values", a.array(&values)),
+            a.build_struct(ctx, &[
+                ("name", a.string(ctx, e_desc.full_name())),
+                ("values", a.array(ctx, &values)),
             ])
         })
         .collect();
 
-    a.ok(a.array(&enum_structs))
+    a.ok(a.array(ctx, &enum_structs))
 }
 
 // ---------------------------------------------------------------------------

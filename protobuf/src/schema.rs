@@ -6,7 +6,7 @@ use std::io::Write;
 use prost_reflect::DescriptorPool;
 use protobuf::Message as ProtobufMessage;
 
-use elle_plugin::{ElleResult, ElleValue};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue};
 
 // ---------------------------------------------------------------------------
 // Internal: parse .proto text via temp file
@@ -53,7 +53,7 @@ pub(crate) fn parse_proto_string(
 // Primitive: protobuf/schema
 // ---------------------------------------------------------------------------
 
-pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn prim_schema(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/schema";
 
@@ -61,7 +61,7 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
     let proto_src = match a.get_string(val0) {
         Some(s) => s.to_string(),
         None => {
-            return a.err("type-error", &format!("{}: expected string, got {}", PRIM, a.type_name(val0)));
+            return a.err(ctx, "type-error", &format!("{}: expected string, got {}", PRIM, a.type_name(val0)));
         }
     };
 
@@ -72,7 +72,7 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
         let opts = unsafe { a.arg(args, nargs, 1) };
         if !a.check_nil(opts) {
             if !a.check_struct(opts) {
-                return a.err("type-error", &format!("{}: expected struct for options, got {}", PRIM, a.type_name(opts)));
+                return a.err(ctx, "type-error", &format!("{}: expected struct for options, got {}", PRIM, a.type_name(opts)));
             }
 
             let path_val = a.get_struct_field(opts, "path");
@@ -80,14 +80,14 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
                 match a.get_string(path_val) {
                     Some(p) => virtual_name = p.to_string(),
                     None => {
-                        return a.err("type-error", &format!("{}: :path must be a string, got {}", PRIM, a.type_name(path_val)));
+                        return a.err(ctx, "type-error", &format!("{}: :path must be a string, got {}", PRIM, a.type_name(path_val)));
                     }
                 }
             }
 
             let includes_val = a.get_struct_field(opts, "includes");
             if !a.check_nil(includes_val) {
-                match extract_string_array(includes_val, PRIM, ":includes") {
+                match extract_string_array(ctx, includes_val, PRIM, ":includes") {
                     Ok(dirs) => include_dirs = dirs,
                     Err(e) => return e,
                 }
@@ -96,8 +96,8 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
     }
 
     match parse_proto_string(&proto_src, &virtual_name, &include_dirs) {
-        Ok(pool) => a.ok(a.external("protobuf/pool", pool)),
-        Err(e) => a.err("protobuf-error", &format!("{}: {}", PRIM, e)),
+        Ok(pool) => a.ok(a.external(ctx, "protobuf/pool", pool)),
+        Err(e) => a.err(ctx, "protobuf-error", &format!("{}: {}", PRIM, e)),
     }
 }
 
@@ -105,19 +105,19 @@ pub fn prim_schema(args: *const ElleValue, nargs: usize) -> ElleResult {
 // Primitive: protobuf/schema-bytes
 // ---------------------------------------------------------------------------
 
-pub fn prim_schema_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
+pub fn prim_schema_bytes(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = crate::api();
     const PRIM: &str = "protobuf/schema-bytes";
 
     let val0 = unsafe { a.arg(args, nargs, 0) };
-    let bytes = match extract_bytes(val0, PRIM) {
+    let bytes = match extract_bytes(ctx, val0, PRIM) {
         Ok(b) => b,
         Err(e) => return e,
     };
 
     match DescriptorPool::decode(bytes.as_slice()) {
-        Ok(pool) => a.ok(a.external("protobuf/pool", pool)),
-        Err(e) => a.err("protobuf-error", &format!("{}: {}", PRIM, e)),
+        Ok(pool) => a.ok(a.external(ctx, "protobuf/pool", pool)),
+        Err(e) => a.err(ctx, "protobuf-error", &format!("{}: {}", PRIM, e)),
     }
 }
 
@@ -125,28 +125,29 @@ pub fn prim_schema_bytes(args: *const ElleValue, nargs: usize) -> ElleResult {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn get_pool<'a>(val: ElleValue, prim: &str) -> Result<&'a DescriptorPool, ElleResult> {
+pub(crate) fn get_pool<'a>(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<&'a DescriptorPool, ElleResult> {
     let a = crate::api();
     a.get_external::<DescriptorPool>(val, "protobuf/pool")
-        .ok_or_else(|| a.err("type-error", &format!("{}: expected protobuf/pool, got {}", prim, a.type_name(val))))
+        .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected protobuf/pool, got {}", prim, a.type_name(val))))
 }
 
-pub(crate) fn extract_bytes(val: ElleValue, prim: &str) -> Result<Vec<u8>, ElleResult> {
+pub(crate) fn extract_bytes(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<Vec<u8>, ElleResult> {
     let a = crate::api();
     if let Some(b) = a.get_bytes(val) {
         return Ok(b.to_vec());
     }
-    Err(a.err("type-error", &format!("{}: expected bytes, got {}", prim, a.type_name(val))))
+    Err(a.err(ctx, "type-error", &format!("{}: expected bytes, got {}", prim, a.type_name(val))))
 }
 
 pub(crate) fn extract_string_array(
+    ctx: *mut ElleCtx,
     val: ElleValue,
     prim: &str,
     field: &str,
 ) -> Result<Vec<String>, ElleResult> {
     let a = crate::api();
     let arr_len = a.get_array_len(val).ok_or_else(|| {
-        a.err("type-error", &format!("{}: {} must be an array, got {}", prim, field, a.type_name(val)))
+        a.err(ctx, "type-error", &format!("{}: {} must be an array, got {}", prim, field, a.type_name(val)))
     })?;
 
     let mut result = Vec::with_capacity(arr_len);
@@ -155,7 +156,7 @@ pub(crate) fn extract_string_array(
         match a.get_string(item) {
             Some(s) => result.push(s.to_string()),
             None => {
-                return Err(a.err("type-error", &format!("{}: {} elements must be strings, got {}", prim, field, a.type_name(item))));
+                return Err(a.err(ctx, "type-error", &format!("{}: {} elements must be strings, got {}", prim, field, a.type_name(item))));
             }
         }
     }
