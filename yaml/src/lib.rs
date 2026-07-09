@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR};
 
 elle_plugin::define_plugin!("yaml/", &PRIMITIVES);
 
@@ -14,7 +14,7 @@ elle_plugin::define_plugin!("yaml/", &PRIMITIVES);
 /// Mappings become immutable structs with keyword keys.
 /// Sequences become immutable arrays.
 /// Null becomes nil.
-fn yaml_to_value(yv: serde_yaml_ng::Value) -> Result<ElleValue, String> {
+fn yaml_to_value(ctx: *mut ElleCtx, yv: serde_yaml_ng::Value) -> Result<ElleValue, String> {
     let a = api();
     match yv {
         serde_yaml_ng::Value::Null => Ok(a.nil()),
@@ -28,11 +28,11 @@ fn yaml_to_value(yv: serde_yaml_ng::Value) -> Result<ElleValue, String> {
                 Err(format!("yaml: unsupported number: {}", n))
             }
         }
-        serde_yaml_ng::Value::String(s) => Ok(a.string(&s)),
+        serde_yaml_ng::Value::String(s) => Ok(a.string(ctx, &s)),
         serde_yaml_ng::Value::Sequence(seq) => {
-            let items: Result<Vec<_>, _> = seq.into_iter().map(yaml_to_value).collect();
+            let items: Result<Vec<_>, _> = seq.into_iter().map(|v| yaml_to_value(ctx, v)).collect();
             let items = items?;
-            Ok(a.array(&items))
+            Ok(a.array(ctx, &items))
         }
         serde_yaml_ng::Value::Mapping(map) => {
             let mut fields: Vec<(&str, ElleValue)> = Vec::new();
@@ -46,7 +46,7 @@ fn yaml_to_value(yv: serde_yaml_ng::Value) -> Result<ElleValue, String> {
                     }
                 };
                 owned_keys.push(key);
-                fields.push(("", yaml_to_value(v)?));
+                fields.push(("", yaml_to_value(ctx, v)?));
             }
             // Patch in key references now that owned_keys is stable
             let kvs: Vec<(&str, ElleValue)> = owned_keys
@@ -54,9 +54,9 @@ fn yaml_to_value(yv: serde_yaml_ng::Value) -> Result<ElleValue, String> {
                 .zip(fields.iter())
                 .map(|(k, (_, v))| (k.as_str(), *v))
                 .collect();
-            Ok(a.build_struct(&kvs))
+            Ok(a.build_struct(ctx, &kvs))
         }
-        serde_yaml_ng::Value::Tagged(tagged) => yaml_to_value(tagged.value),
+        serde_yaml_ng::Value::Tagged(tagged) => yaml_to_value(ctx, tagged.value),
     }
 }
 
@@ -67,7 +67,7 @@ fn yaml_to_value(yv: serde_yaml_ng::Value) -> Result<ElleValue, String> {
 /// Recursively convert an Elle `ElleValue` to a `serde_yaml_ng::Value`.
 /// Returns an error for types that have no YAML equivalent (closures, etc.).
 /// nil → Null (YAML supports null, unlike TOML).
-fn value_to_yaml(v: ElleValue, name: &str) -> Result<serde_yaml_ng::Value, ElleResult> {
+fn value_to_yaml(ctx: *mut ElleCtx, v: ElleValue, name: &str) -> Result<serde_yaml_ng::Value, ElleResult> {
     let a = api();
     if a.check_nil(v) {
         return Ok(serde_yaml_ng::Value::Null);
@@ -88,7 +88,7 @@ fn value_to_yaml(v: ElleValue, name: &str) -> Result<serde_yaml_ng::Value, ElleR
     if let Some(len) = a.get_array_len(v) {
         let mut items = Vec::with_capacity(len);
         for i in 0..len {
-            items.push(value_to_yaml(a.get_array_item(v, i), name)?);
+            items.push(value_to_yaml(ctx, a.get_array_item(v, i), name)?);
         }
         return Ok(serde_yaml_ng::Value::Sequence(items));
     }
@@ -98,12 +98,12 @@ fn value_to_yaml(v: ElleValue, name: &str) -> Result<serde_yaml_ng::Value, ElleR
         let mut map = serde_yaml_ng::Mapping::new();
         for (key, field_val) in entries {
             let yaml_key = serde_yaml_ng::Value::String(key.to_string());
-            let yaml_val = value_to_yaml(field_val, name)?;
+            let yaml_val = value_to_yaml(ctx, field_val, name)?;
             map.insert(yaml_key, yaml_val);
         }
         return Ok(serde_yaml_ng::Value::Mapping(map));
     }
-    Err(a.err(
+    Err(a.err(ctx, 
         "yaml-error",
         &format!("{}: cannot encode {} as YAML", name, a.type_name(v)),
     ))
@@ -113,11 +113,11 @@ fn value_to_yaml(v: ElleValue, name: &str) -> Result<serde_yaml_ng::Value, ElleR
 // Primitives
 // ---------------------------------------------------------------------------
 
-extern "C" fn prim_yaml_parse(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_yaml_parse(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "yaml/parse";
     if nargs != 1 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
@@ -125,7 +125,7 @@ extern "C" fn prim_yaml_parse(args: *const ElleValue, nargs: usize) -> ElleResul
     let text = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "{}: expected string, got {}",
@@ -136,19 +136,19 @@ extern "C" fn prim_yaml_parse(args: *const ElleValue, nargs: usize) -> ElleResul
         }
     };
     match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
-        Ok(yv) => match yaml_to_value(yv) {
+        Ok(yv) => match yaml_to_value(ctx, yv) {
             Ok(v) => a.ok(v),
-            Err(e) => a.err("yaml-error", &format!("{}: {}", name, e)),
+            Err(e) => a.err(ctx, "yaml-error", &format!("{}: {}", name, e)),
         },
-        Err(e) => a.err("yaml-error", &format!("{}: {}", name, e)),
+        Err(e) => a.err(ctx, "yaml-error", &format!("{}: {}", name, e)),
     }
 }
 
-extern "C" fn prim_yaml_parse_all(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_yaml_parse_all(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "yaml/parse-all";
     if nargs != 1 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
@@ -156,7 +156,7 @@ extern "C" fn prim_yaml_parse_all(args: *const ElleValue, nargs: usize) -> ElleR
     let text = match a.get_string(unsafe { a.arg(args, nargs, 0) }) {
         Some(s) => s.to_string(),
         None => {
-            return a.err(
+            return a.err(ctx, 
                 "type-error",
                 &format!(
                     "{}: expected string, got {}",
@@ -171,35 +171,35 @@ extern "C" fn prim_yaml_parse_all(args: *const ElleValue, nargs: usize) -> ElleR
         let yv = match serde_yaml_ng::Value::deserialize(doc) {
             Ok(v) => v,
             Err(e) => {
-                return a.err("yaml-error", &format!("{}: {}", name, e));
+                return a.err(ctx, "yaml-error", &format!("{}: {}", name, e));
             }
         };
-        match yaml_to_value(yv) {
+        match yaml_to_value(ctx, yv) {
             Ok(v) => docs.push(v),
             Err(e) => {
-                return a.err("yaml-error", &format!("{}: {}", name, e));
+                return a.err(ctx, "yaml-error", &format!("{}: {}", name, e));
             }
         }
     }
-    a.ok(a.array(&docs))
+    a.ok(a.array(ctx, &docs))
 }
 
-extern "C" fn prim_yaml_encode(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_yaml_encode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "yaml/encode";
     if nargs != 1 {
-        return a.err(
+        return a.err(ctx, 
             "arity-error",
             &format!("{}: expected 1 argument, got {}", name, nargs),
         );
     }
-    let yv = match value_to_yaml(unsafe { a.arg(args, nargs, 0) }, name) {
+    let yv = match value_to_yaml(ctx, unsafe { a.arg(args, nargs, 0) }, name) {
         Ok(v) => v,
         Err(e) => return e,
     };
     match serde_yaml_ng::to_string(&yv) {
-        Ok(s) => a.ok(a.string(&s)),
-        Err(e) => a.err("yaml-error", &format!("{}: {}", name, e)),
+        Ok(s) => a.ok(a.string(ctx, &s)),
+        Err(e) => a.err(ctx, "yaml-error", &format!("{}: {}", name, e)),
     }
 }
 
