@@ -8,7 +8,7 @@
 use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 use rustls::client::UnbufferedClientConnection;
 use rustls::server::UnbufferedServerConnection;
-use rustls::unbuffered::{ConnectionState, UnbufferedStatus};
+use rustls::unbuffered::{ConnectionState, EncryptError, UnbufferedStatus};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use rustls_native_certs::load_native_certs;
 use rustls_pki_types::pem::PemObject;
@@ -380,9 +380,23 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
                     Ok(ConnectionState::WriteTraffic(mut wt)) => {
                         if discard > 0 { incoming.drain(..discard); }
                         let start = outgoing.len();
+                        // Plaintext is split across 16 KiB TLS records, each paying its
+                        // own header + AEAD tag, so ciphertext grows with the RECORD
+                        // COUNT. A flat slack (this was 256 bytes) covers ~11 records
+                        // and silently caps the payload: every larger write then fails.
+                        // Ask rustls for the size it needs instead of guessing.
                         outgoing.resize(start + n + 256, 0u8);
                         match wt.encrypt(&data, &mut outgoing[start..]) {
                             Ok(written) => { outgoing.truncate(start + written); }
+                            Err(EncryptError::InsufficientSize(need)) => {
+                                outgoing.resize(start + need.required_size, 0u8);
+                                match wt.encrypt(&data, &mut outgoing[start..]) {
+                                    Ok(written) => { outgoing.truncate(start + written); }
+                                    // A second InsufficientSize would mean the size
+                                    // rustls asked for is still short; report, no loop.
+                                    Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
+                                }
+                            }
                             Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
                         }
                         break;
@@ -413,9 +427,23 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
                     Ok(ConnectionState::WriteTraffic(mut wt)) => {
                         if discard > 0 { incoming.drain(..discard); }
                         let start = outgoing.len();
+                        // Plaintext is split across 16 KiB TLS records, each paying its
+                        // own header + AEAD tag, so ciphertext grows with the RECORD
+                        // COUNT. A flat slack (this was 256 bytes) covers ~11 records
+                        // and silently caps the payload: every larger write then fails.
+                        // Ask rustls for the size it needs instead of guessing.
                         outgoing.resize(start + n + 256, 0u8);
                         match wt.encrypt(&data, &mut outgoing[start..]) {
                             Ok(written) => { outgoing.truncate(start + written); }
+                            Err(EncryptError::InsufficientSize(need)) => {
+                                outgoing.resize(start + need.required_size, 0u8);
+                                match wt.encrypt(&data, &mut outgoing[start..]) {
+                                    Ok(written) => { outgoing.truncate(start + written); }
+                                    // A second InsufficientSize would mean the size
+                                    // rustls asked for is still short; report, no loop.
+                                    Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
+                                }
+                            }
                             Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
                         }
                         break;
