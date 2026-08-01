@@ -20,9 +20,12 @@
 
 (assert (not (nil? (store-new))) "store-new returns non-nil")
 
-(def tmp-path "/tmp/elle-oxigraph-test-store")
-
-(assert (not (nil? (store-open tmp-path))) "store-open with temp path returns non-nil")
+## The store path comes from the platform temp root and is unique per run;
+## with-temp-dir removes the tree afterwards. A fixed name here would make two
+## concurrent runs open the same on-disk store.
+(with-temp-dir dir
+               (assert (not (nil? (store-open (path/join dir "store"))))
+                       "store-open with temp path returns non-nil"))
 
 ## ── Scenario 2: Term constructors ──────────────────────────────────
 
