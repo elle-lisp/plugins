@@ -49,7 +49,59 @@ pub struct TlsServerConfig {
 | `tls/read-plaintext` | 2 | silent | bytes | Drain up to N bytes from plaintext buffer |
 | `tls/plaintext-indexof` | 2 | silent | int or nil | Scan for byte without draining |
 | `tls/handshake-complete?` | 1 | silent | bool | Check handshake status |
+| `tls/alpn-protocol` | 1 | errors | string or nil | Protocol agreed via ALPN |
 | `tls/close-notify` | 1 | errors | `{:outgoing bytes}` | Encode close_notify alert bytes |
+
+The "silent" primitives above still raise `:type-error` when handed
+something that is not a tls-state. The column describes the signals they
+raise in normal operation, not argument validation.
+
+## Options for `tls/client-state`
+
+The optional second argument is a struct. Unknown keys are ignored.
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `:no-verify` | bool | false | Skip server certificate verification. Development only |
+| `:ca-file` | string | — | PEM CA bundle that replaces the system roots |
+| `:client-cert` | string | — | PEM client certificate chain, for mutual TLS |
+| `:client-key` | string | — | PEM private key matching `:client-cert` |
+| `:alpn` | array of strings | `["http/1.1"]` | Protocols to offer, most preferred first |
+
+`:client-cert` and `:client-key` are a pair. Supplying one without the
+other is a `:value-error` — a half-configured client would otherwise
+fail later, during the handshake, where the cause is much harder to see.
+
+`:alpn` defaults to `["http/1.1"]` rather than to nothing, because that
+is what this plugin has always offered. Pass `[]` to send no ALPN
+extension at all. Every element must be a non-empty string.
+
+## Options for `tls/server-config`
+
+The optional third argument is a struct. Unknown keys are ignored.
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `:alpn` | array of strings | none | Protocols the server accepts, most preferred first |
+| `:client-ca` | string | — | PEM CA bundle for verifying client certificates. Enables mutual TLS |
+
+A server with no `:alpn` accepts no ALPN extension, so
+`tls/alpn-protocol` returns nil on both sides.
+
+Setting `:client-ca` makes the server request a client certificate and
+refuse the handshake when the client does not present one that the CA
+bundle verifies.
+
+## ALPN
+
+The client offers `:alpn` and the server picks the first entry of its
+own `:alpn` that the client also offered. `tls/alpn-protocol` returns
+that choice on both sides once the handshake is complete, and nil
+before then or when no protocol was agreed.
+
+When both sides configure ALPN but share no protocol, rustls fails the
+handshake with a `no_application_protocol` alert. This surfaces as a
+`:tls-error` from `tls/process`, not as a nil protocol.
 
 ## Status keywords from `tls/process`
 
@@ -68,6 +120,15 @@ pub struct TlsServerConfig {
 | Bad hostname for SNI | `:tls-error` | `"tls/client-state: invalid hostname: ..."` |
 | Empty hostname | `:tls-error` | `"tls/client-state: hostname must not be empty"` |
 | System CA load failure | `:tls-error` | `"tls/client-state: ..."` |
+| `:client-cert` without `:client-key` | `:value-error` | `"tls/client-state: :client-cert requires :client-key"` |
+| `:client-key` without `:client-cert` | `:value-error` | `"tls/client-state: :client-key requires :client-cert"` |
+| Client cert file not found | `:io-error` | `"tls/client-state: reading client-cert '...'..."` |
+| Client cert/key rejected | `:tls-error` | `"tls/client-state: client cert error: ..."` |
+| `:alpn` not an array | `:type-error` | `"tls/client-state: :alpn must be an array of strings, got ..."` |
+| Empty `:alpn` entry | `:value-error` | `"tls/client-state: :alpn entries must not be empty"` |
+| `:client-ca` file not found | `:io-error` | `"tls/server-config: reading client-ca '...'..."` |
+| No usable CA in `:client-ca` | `:tls-error` | `"tls/server-config: client-ca ..."` |
+| No shared ALPN protocol | `:tls-error` | `"tls/process: peer is incompatible: no application protocol"` |
 | rustls protocol error | `:tls-error` | `"tls/process: ..."` |
 | Write before handshake | — (returns `{:status :error :message string}`) | `"tls/write-plaintext: handshake not complete"` |
 | Cert file not found | `:io-error` | `"tls/server-config: reading cert-path '...'..."` |
@@ -124,5 +185,7 @@ pub struct TlsServerConfig {
 | File | Purpose |
 |------|---------|
 | `Cargo.toml` | Crate definition (cdylib, dependencies) |
-| `src/lib.rs` | All primitives, structs, entry point |
-| `../tests/tls.lisp` | Integration tests — a client and a server state machine wired to each other in process, no sockets |
+| `src/lib.rs` | State structs, drive loop, primitives, entry point |
+| `src/config.rs` | Option parsing and rustls config construction |
+| `src/verify.rs` | The `:no-verify` certificate verifier |
+| `../tests/tls.lisp` | Integration tests — a client and a server state machine wired to each other in process, plus one ALPN handshake over a socket |

@@ -37,6 +37,7 @@
 (def plaintext-indexof-fn   (get plugin :plaintext-indexof))
 (def handshake-complete?-fn (get plugin :handshake-complete?))
 (def write-plaintext-fn     (get plugin :write-plaintext))
+(def alpn-protocol-fn       (get plugin :alpn-protocol))
 (def close-notify-fn        (get plugin :close-notify))
 
 ## ── The registered primitive table ────────────────────────────────
@@ -44,7 +45,7 @@
 (each k in [:client-state :server-config :server-state :process
             :get-outgoing :get-plaintext :read-plaintext
             :plaintext-indexof :handshake-complete? :write-plaintext
-            :close-notify]
+            :alpn-protocol :close-notify]
   (assert (not (nil? (get plugin k)))
           (string "tls: plugin must export " (string k))))
 
@@ -100,6 +101,25 @@
             "tls/write-plaintext: an :ok write must carry ciphertext")
     (process-fn to w:outgoing)))
 
+(defn connected [config client-opts]
+  "Handshake a client against a server config in process.
+   Returns [client server]."
+  (let [client (client-state-fn "localhost" client-opts)
+        server (server-state-fn config)]
+    (handshake client server)
+    [client server]))
+
+(defn openssl [argv]
+  "Run openssl with the given argument array. Returns its exit status."
+  (let [r (subprocess/system "openssl" argv)]
+    r:exit))
+
+(defn self-signed [cert-path key-path common-name]
+  "Write a self-signed certificate and its key. Returns the openssl status."
+  (openssl ["req" "-x509" "-newkey" "rsa:2048"
+            "-keyout" key-path "-out" cert-path
+            "-days" "1" "-nodes" "-subj" (string "/CN=" common-name)]))
+
 ## ── Loopback: handshake, data transfer, shutdown ──────────────────
 ##
 ## Needs a certificate, so it needs openssl. Skip the section if openssl is
@@ -108,11 +128,8 @@
 (with-temp-dir scratch
   (let [cert-path (path/join scratch "cert.pem")
         key-path (path/join scratch "key.pem")
-        gen (subprocess/system "openssl"
-                               ["req" "-x509" "-newkey" "rsa:2048"
-                                "-keyout" key-path "-out" cert-path
-                                "-days" "1" "-nodes" "-subj" "/CN=localhost"])]
-    (if (not (= gen:exit 0))
+        gen (self-signed cert-path key-path "localhost")]
+    (if (not (= gen 0))
       (println "SKIP: openssl not available; loopback tests skipped")
       (begin
         (def config (server-config-fn cert-path key-path))
@@ -175,6 +192,179 @@
 
         (println "tls: loopback handshake, transfer and shutdown PASSED")))))
 
+## ── ALPN ──────────────────────────────────────────────────────────
+##
+## RFC 7301. The client offers a list, the server picks from its own list,
+## and both sides then report the same answer.
+
+(with-temp-dir scratch
+  (let [cert-path (path/join scratch "cert.pem")
+        key-path (path/join scratch "key.pem")
+        gen (self-signed cert-path key-path "localhost")]
+    (if (not (= gen 0))
+      (println "SKIP: openssl not available; ALPN tests skipped")
+      (begin
+        ## Nothing is agreed until the handshake has run.
+        (assert (nil? (alpn-protocol-fn (client-state-fn "localhost")))
+                "tls/alpn-protocol: nil before the handshake")
+
+        ## Both sides offer h2 and both sides report it.
+        (let [config (server-config-fn cert-path key-path {:alpn ["h2"]})
+              [c s] (connected config {:no-verify true :alpn ["h2" "http/1.1"]})]
+          (assert (= (alpn-protocol-fn c) "h2")
+                  (string "tls/alpn-protocol: client expected h2, got "
+                          (string (alpn-protocol-fn c))))
+          (assert (= (alpn-protocol-fn s) "h2")
+                  (string "tls/alpn-protocol: server expected h2, got "
+                          (string (alpn-protocol-fn s)))))
+
+        ## rustls picks by SERVER preference, not client preference: it walks
+        ## its own list and takes the first entry the client also offered.
+        ## The two lists are reversed here so the orders disagree.
+        (let [config (server-config-fn cert-path key-path {:alpn ["h2" "http/1.1"]})
+              [c _] (connected config {:no-verify true :alpn ["http/1.1" "h2"]})]
+          (assert (= (alpn-protocol-fn c) "h2")
+                  (string "tls/alpn-protocol: server preference wins, expected h2, got "
+                          (string (alpn-protocol-fn c)))))
+
+        ## A server that configures no protocols agrees to none.
+        (let [config (server-config-fn cert-path key-path)
+              [c s] (connected config {:no-verify true :alpn ["h2"]})]
+          (assert (nil? (alpn-protocol-fn c))
+                  "tls/alpn-protocol: nil when the server offers no protocols")
+          (assert (nil? (alpn-protocol-fn s))
+                  "tls/alpn-protocol: nil on the server too"))
+
+        ## An empty client list sends no ALPN extension, so the server has
+        ## nothing to select from and the handshake still succeeds.
+        (let [config (server-config-fn cert-path key-path {:alpn ["h2"]})
+              [c _] (connected config {:no-verify true :alpn []})]
+          (assert (nil? (alpn-protocol-fn c))
+                  "tls/alpn-protocol: nil when the client offers no protocols"))
+
+        ## Disjoint lists are fatal — RFC 7301 §3.2 requires the
+        ## no_application_protocol alert, which surfaces as a signal.
+        (let [config (server-config-fn cert-path key-path {:alpn ["http/1.1"]})
+              [ok? err] (protect (connected config {:no-verify true :alpn ["h2"]}))]
+          (assert (not ok?) "tls: disjoint ALPN lists must fail the handshake")
+          (assert (= (get err :error) :tls-error)
+                  (string "tls: disjoint ALPN is :tls-error, got "
+                          (string (get err :error)))))
+
+        (println "tls: ALPN negotiation PASSED")))))
+
+## ── Mutual TLS ────────────────────────────────────────────────────
+##
+## The server names a CA in :client-ca, which makes it demand a client
+## certificate that the CA signed.
+
+(with-temp-dir scratch
+  (let [ca-cert (path/join scratch "ca.pem")
+        ca-key (path/join scratch "ca.key")
+        server-cert (path/join scratch "server.pem")
+        server-key (path/join scratch "server.key")
+        client-cert (path/join scratch "client.pem")
+        client-key (path/join scratch "client.key")
+        client-csr (path/join scratch "client.csr")
+        ext-file (path/join scratch "client.ext")]
+    ## webpki requires the clientAuth extended key usage on a client
+    ## certificate, so sign the CSR with an extension file that sets it.
+    (file/write ext-file "extendedKeyUsage=clientAuth\n")
+    (let [status (+ (self-signed ca-cert ca-key "test-ca")
+                    (self-signed server-cert server-key "localhost")
+                    (openssl ["req" "-newkey" "rsa:2048" "-keyout" client-key
+                              "-out" client-csr "-nodes" "-subj" "/CN=test-client"])
+                    (openssl ["x509" "-req" "-in" client-csr
+                              "-CA" ca-cert "-CAkey" ca-key
+                              "-out" client-cert "-days" "1"
+                              "-set_serial" "1" "-extfile" ext-file]))]
+      (if (not (= status 0))
+        (println "SKIP: openssl not available; mutual TLS tests skipped")
+        (begin
+          (def config (server-config-fn server-cert server-key
+                                        {:client-ca ca-cert}))
+
+          ## A client holding the signed certificate is admitted, and the
+          ## server can see which certificate it presented.
+          (let [[c s] (connected config {:no-verify true
+                                         :client-cert client-cert
+                                         :client-key client-key})]
+            (assert (handshake-complete?-fn c)
+                    "mutual TLS: the client completes the handshake")
+            (assert (handshake-complete?-fn s)
+                    "mutual TLS: the server completes the handshake")
+            (assert (= (deliver c s (bytes "authenticated\n")) :has-data)
+                    "mutual TLS: application data flows after the handshake")
+            (assert (= (string (get-plaintext-fn s)) "authenticated\n")
+                    "mutual TLS: the server reads what the client wrote"))
+
+          ## A client with no certificate is refused.
+          (let [[ok? err] (protect (connected config {:no-verify true}))]
+            (assert (not ok?)
+                    "mutual TLS: a client with no certificate must be refused")
+            (assert (= (get err :error) :tls-error)
+                    (string "mutual TLS: refusal is :tls-error, got "
+                            (string (get err :error)))))
+
+          ## A server without :client-ca asks for nothing, so the same
+          ## bare client connects.
+          (let [open-config (server-config-fn server-cert server-key)
+                [c _] (connected open-config {:no-verify true})]
+            (assert (handshake-complete?-fn c)
+                    "mutual TLS: no :client-ca means no certificate is demanded"))
+
+          (println "tls: mutual TLS PASSED"))))))
+
+## ── Option validation ─────────────────────────────────────────────
+
+(let [[ok? err] (protect (client-state-fn "example.com"
+                                          {:client-cert "/nonexistent/c.pem"}))]
+  (assert (not ok?) "tls/client-state: :client-cert alone must signal")
+  (assert (= (get err :error) :value-error)
+          (string "tls/client-state: :client-cert alone is :value-error, got "
+                  (string (get err :error)))))
+
+(let [[ok? err] (protect (client-state-fn "example.com"
+                                          {:client-key "/nonexistent/k.pem"}))]
+  (assert (not ok?) "tls/client-state: :client-key alone must signal")
+  (assert (= (get err :error) :value-error)
+          (string "tls/client-state: :client-key alone is :value-error, got "
+                  (string (get err :error)))))
+
+(let [[ok? err] (protect (client-state-fn "example.com"
+                                          {:client-cert "/nonexistent/c.pem"
+                                           :client-key "/nonexistent/k.pem"}))]
+  (assert (not ok?) "tls/client-state: a missing client cert must signal")
+  (assert (= (get err :error) :io-error)
+          (string "tls/client-state: a missing client cert is :io-error, got "
+                  (string (get err :error)))))
+
+(let [[ok? err] (protect (client-state-fn "example.com" {:alpn "h2"}))]
+  (assert (not ok?) "tls/client-state: a string :alpn must signal")
+  (assert (= (get err :error) :type-error)
+          (string "tls/client-state: a string :alpn is :type-error, got "
+                  (string (get err :error)))))
+
+(let [[ok? err] (protect (client-state-fn "example.com" {:alpn [""]}))]
+  (assert (not ok?) "tls/client-state: an empty :alpn entry must signal")
+  (assert (= (get err :error) :value-error)
+          (string "tls/client-state: an empty :alpn entry is :value-error, got "
+                  (string (get err :error)))))
+
+(let [[ok? err] (protect (client-state-fn "example.com" {:alpn [1 2]}))]
+  (assert (not ok?) "tls/client-state: a non-string :alpn entry must signal")
+  (assert (= (get err :error) :type-error)
+          (string "tls/client-state: a non-string :alpn entry is :type-error, got "
+                  (string (get err :error)))))
+
+(let [[ok? err] (protect (alpn-protocol-fn "not-a-state"))]
+  (assert (not ok?) "tls/alpn-protocol: a string argument must signal")
+  (assert (= (get err :error) :type-error)
+          (string "tls/alpn-protocol: a string argument is :type-error, got "
+                  (string (get err :error)))))
+
+(println "tls: option validation PASSED")
+
 ## ── Error cases ───────────────────────────────────────────────────
 
 (let [[ok? err] (protect (client-state-fn ""))]
@@ -207,4 +397,78 @@
           (string "tls/server-config: a missing cert is :io-error, got "
                   (string (get err :error)))))
 
+(with-temp-dir scratch
+  (let [cert-path (path/join scratch "cert.pem")
+        key-path (path/join scratch "key.pem")]
+    (when (= (self-signed cert-path key-path "localhost") 0)
+      (let [[ok? err] (protect (server-config-fn cert-path key-path
+                                                 {:client-ca "/nonexistent/ca.pem"}))]
+        (assert (not ok?) "tls/server-config: a missing :client-ca must signal")
+        (assert (= (get err :error) :io-error)
+                (string "tls/server-config: a missing :client-ca is :io-error, got "
+                        (string (get err :error))))))))
+
 (println "tls: error cases PASSED")
+
+## ── ALPN against a real server ────────────────────────────────────
+##
+## The in-process tests above pair this plugin with itself, so they cannot
+## catch a ClientHello that other implementations reject. This section runs
+## the same handshake over a socket against a public HTTP/2 endpoint.
+##
+## Sockets, but still no elle-side TLS library: tcp/connect gives a port and
+## the state machine is driven by hand, exactly as lib/tls.lisp does it.
+
+(def net-host "www.google.com")
+
+(defn write-all [port data]
+  "Send every byte. port/write issues one write(2) and returns what the
+   kernel took, which on a socket is often less than the whole buffer."
+  (let [@sent 0]
+    (forever
+      (when (>= sent (length data)) (break nil))
+      (assign sent (+ sent (port/write port (slice data sent)))))))
+
+(defn socket-handshake [port st]
+  "Drive a handshake over a real socket to completion."
+  (process-fn st (bytes))
+  (let [@rounds 0]
+    (forever
+      (assign rounds (+ rounds 1))
+      (when (> rounds max-rounds)
+        (error {:error :test-error :message "socket handshake did not settle"}))
+      ## INVARIANT: send queued ciphertext before reading, and check for
+      ## completion only after sending — the peer needs our Finished.
+      (let [out (get-outgoing-fn st)]
+        (when (> (length out) 0) (write-all port out)))
+      (when (handshake-complete?-fn st) (break nil))
+      (let [data (port/read port 16384)]
+        (when (nil? data)
+          (error {:error :test-error
+                  :message "peer closed during handshake"}))
+        (process-fn st data)))))
+
+(defn negotiate [opts]
+  "Handshake against net-host with the given client options.
+   Returns the protocol agreed via ALPN."
+  (let [port (tcp/connect net-host 443)
+        st (client-state-fn net-host opts)]
+    (defer
+      (port/close port)
+      (socket-handshake port st)
+      (assert (handshake-complete?-fn st)
+              "tls: the handshake against a real server must complete")
+      (alpn-protocol-fn st))))
+
+(let [agreed (negotiate {:alpn ["h2" "http/1.1"]})]
+  (assert (= agreed "h2")
+          (string "tls: " net-host " must negotiate h2, got " (string agreed))))
+
+## No :alpn option means the historical default, ["http/1.1"], which the
+## same server answers with http/1.1.
+(let [agreed (negotiate {})]
+  (assert (= agreed "http/1.1")
+          (string "tls: the default offer must negotiate http/1.1, got "
+                  (string agreed))))
+
+(println "tls: ALPN against a real server PASSED")

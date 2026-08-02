@@ -8,14 +8,16 @@
 use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK, SIG_ERROR};
 use rustls::client::UnbufferedClientConnection;
 use rustls::server::UnbufferedServerConnection;
-use rustls::unbuffered::{ConnectionState, EncryptError, UnbufferedStatus};
-use rustls::{ClientConfig, RootCertStore, ServerConfig};
-use rustls_native_certs::load_native_certs;
-use rustls_pki_types::pem::PemObject;
-use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::unbuffered::{
+    ConnectionState, EncodeTlsData, EncryptError, ReadTraffic, UnbufferedStatus, WriteTraffic,
+};
 use std::cell::{Cell, RefCell};
-use std::io::Cursor;
 use std::sync::Arc;
+
+mod config;
+mod verify;
+
+use config::{ClientOpts, ServerOpts};
 
 // ---------------------------------------------------------------------------
 // State structs
@@ -35,8 +37,32 @@ pub struct TlsState {
     close_notify_pending: Cell<bool>,
 }
 
+impl TlsState {
+    /// Wrap a fresh connection. All three buffers start empty and the
+    /// handshake starts incomplete, whichever side this is.
+    fn new(conn: TlsConnection) -> Self {
+        TlsState {
+            conn: RefCell::new(conn),
+            incoming: RefCell::new(Vec::new()),
+            outgoing: RefCell::new(Vec::new()),
+            plaintext: RefCell::new(Vec::new()),
+            handshake_complete: Cell::new(false),
+            close_notify_pending: Cell::new(false),
+        }
+    }
+
+    /// The protocol agreed via ALPN, or None before the handshake settles
+    /// and when no protocol was agreed.
+    fn alpn_protocol(&self) -> Option<Vec<u8>> {
+        match &*self.conn.borrow() {
+            TlsConnection::Client(c) => c.alpn_protocol().map(|p| p.to_vec()),
+            TlsConnection::Server(s) => s.alpn_protocol().map(|p| p.to_vec()),
+        }
+    }
+}
+
 pub struct TlsServerConfig {
-    config: Arc<ServerConfig>,
+    config: Arc<rustls::ServerConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -69,88 +95,97 @@ fn tls_err(ctx: *mut ElleCtx, name: &str, msg: impl std::fmt::Display) -> ElleRe
     api().err(ctx, "tls-error", &format!("{}: {}", name, msg))
 }
 
-fn io_err(ctx: *mut ElleCtx, name: &str, msg: impl std::fmt::Display) -> ElleResult {
-    api().err(ctx, "io-error", &format!("{}: {}", name, msg))
+/// Drop the bytes rustls consumed from the head of the incoming buffer.
+fn discard_consumed(incoming: &mut Vec<u8>, discard: usize) {
+    if discard > 0 {
+        incoming.drain(..discard);
+    }
 }
 
-fn build_client_config(no_verify: bool, ca_file: Option<&str>) -> Result<Arc<ClientConfig>, String> {
-    if no_verify {
-        let mut config = ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoVerifier))
-            .with_no_client_auth();
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        return Ok(Arc::new(config));
-    }
-    let mut root_store = RootCertStore::empty();
-    if let Some(path) = ca_file {
-        let data = std::fs::read(path).map_err(|e| format!("ca-file: {}", e))?;
-        let mut reader = Cursor::new(&data);
-        for cert in CertificateDer::pem_reader_iter(&mut reader) {
-            let cert = cert.map_err(|e| format!("ca-file PEM error: {}", e))?;
-            root_store.add(cert).map_err(|e| format!("ca-file cert error: {}", e))?;
+/// A handshake record never exceeds 16 KiB plus its header and tag.
+const RECORD_BUFFER: usize = 16_640;
+
+/// Append one handshake record to the outgoing buffer.
+fn encode_record<D>(encode: &mut EncodeTlsData<'_, D>, outgoing: &mut Vec<u8>) -> Result<(), String> {
+    let start = outgoing.len();
+    outgoing.resize(start + RECORD_BUFFER, 0u8);
+    match encode.encode(&mut outgoing[start..]) {
+        Ok(written) => {
+            outgoing.truncate(start + written);
+            Ok(())
         }
-    } else {
-        let native_result = load_native_certs();
-        let loaded: Vec<_> = native_result.certs;
-        if loaded.is_empty() {
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        } else {
-            for cert in loaded {
-                root_store.add(cert).map_err(|e| format!("native cert error: {}", e))?;
+        Err(e) => {
+            outgoing.truncate(start);
+            Err(format!("encode error: {}", e))
+        }
+    }
+}
+
+/// Append the ciphertext for `data` to the outgoing buffer.
+///
+/// rustls splits the plaintext across 16 KiB records and each record pays its
+/// own header and AEAD tag, so the ciphertext grows with the RECORD COUNT. A
+/// flat slack would cover only the first handful of records and cap the
+/// payload, so ask rustls for the size it wants and retry at that size.
+fn encrypt_records<D>(wt: &mut WriteTraffic<'_, D>, data: &[u8], outgoing: &mut Vec<u8>) -> Result<(), String> {
+    let start = outgoing.len();
+    outgoing.resize(start + data.len() + 256, 0u8);
+    match wt.encrypt(data, &mut outgoing[start..]) {
+        Ok(written) => {
+            outgoing.truncate(start + written);
+            Ok(())
+        }
+        Err(EncryptError::InsufficientSize(need)) => {
+            outgoing.resize(start + need.required_size, 0u8);
+            match wt.encrypt(data, &mut outgoing[start..]) {
+                Ok(written) => {
+                    outgoing.truncate(start + written);
+                    Ok(())
+                }
+                // A second InsufficientSize would mean the size rustls asked
+                // for is still short; report, no loop.
+                Err(e) => {
+                    outgoing.truncate(start);
+                    Err(format!("encrypt error: {}", e))
+                }
             }
         }
+        Err(e) => {
+            outgoing.truncate(start);
+            Err(format!("encrypt error: {}", e))
+        }
     }
-    let mut config = ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    Ok(Arc::new(config))
 }
 
-#[derive(Debug)]
-struct NoVerifier;
-
-impl rustls::client::danger::ServerCertVerifier for NoVerifier {
-    fn verify_server_cert(&self, _end_entity: &rustls::pki_types::CertificateDer<'_>, _intermediates: &[rustls::pki_types::CertificateDer<'_>], _server_name: &rustls::pki_types::ServerName<'_>, _ocsp: &[u8], _now: rustls::pki_types::UnixTime) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
+/// Drain every decrypted record into the plaintext buffer.
+fn take_records<D>(rt: &mut ReadTraffic<'_, '_, D>, plaintext: &mut Vec<u8>) -> Result<(), String> {
+    while let Some(record) = rt.next_record() {
+        match record {
+            Ok(app_data) => plaintext.extend_from_slice(app_data.payload),
+            Err(e) => return Err(format!("read_traffic error: {}", e)),
+        }
     }
-    fn verify_tls12_signature(&self, _message: &[u8], _cert: &rustls::pki_types::CertificateDer<'_>, _dss: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-    fn verify_tls13_signature(&self, _message: &[u8], _cert: &rustls::pki_types::CertificateDer<'_>, _dss: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes()
-    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Drive loop helper
+// Drive loop
 // ---------------------------------------------------------------------------
 
 macro_rules! handle_conn_state {
     ($ctx:expr, $conn_state:expr, $outgoing:expr, $plaintext:expr, $handshake_done:expr, $state:expr) => {{
         match $conn_state {
             ConnectionState::EncodeTlsData(mut encode) => {
-                let start = $outgoing.len();
-                $outgoing.resize(start + 16_640, 0u8);
-                let written = match encode.encode(&mut $outgoing[start..]) {
-                    Ok(w) => w,
-                    Err(e) => return Err(tls_err($ctx, "tls/process", format!("encode error: {}", e))),
-                };
-                $outgoing.truncate(start + written);
+                if let Err(e) = encode_record(&mut encode, &mut $outgoing) {
+                    return Err(tls_err($ctx, "tls/process", e));
+                }
                 None
             }
             ConnectionState::TransmitTlsData(transmit) => { transmit.done(); None }
             ConnectionState::BlockedHandshake => Some("handshaking"),
             ConnectionState::ReadTraffic(mut read_traffic) => {
-                while let Some(record) = read_traffic.next_record() {
-                    match record {
-                        Ok(app_data) => $plaintext.extend_from_slice(app_data.payload),
-                        Err(e) => return Err(tls_err($ctx, "tls/process", format!("read_traffic error: {}", e))),
-                    }
+                if let Err(e) = take_records(&mut read_traffic, &mut $plaintext) {
+                    return Err(tls_err($ctx, "tls/process", e));
                 }
                 Some("has-data")
             }
@@ -188,10 +223,10 @@ fn drive_state_machine(ctx: *mut ElleCtx, state: &TlsState, new_data: &[u8]) -> 
             ($raw_conn:expr) => {{
                 let UnbufferedStatus { discard, state: cs } = $raw_conn.process_tls_records(&mut incoming);
                 let status = match cs {
-                    Err(e) => { if discard > 0 { incoming.drain(..discard); } return Err(tls_err(ctx, "tls/process", e)); }
+                    Err(e) => { discard_consumed(&mut incoming, discard); return Err(tls_err(ctx, "tls/process", e)); }
                     Ok(conn_state) => {
                         let r = handle_conn_state!(ctx, conn_state, outgoing, plaintext, state.handshake_complete, state);
-                        if discard > 0 { incoming.drain(..discard); }
+                        discard_consumed(&mut incoming, discard);
                         r
                     }
                 };
@@ -233,20 +268,11 @@ extern "C" fn prim_tls_client_state(ctx: *mut ElleCtx, args: *const ElleValue, n
         None => return a.err(ctx, "type-error", &format!("{}: expected string for hostname, got {}", name, a.type_name(v0))),
     };
 
-    let no_verify = if nargs > 1 {
-        let opts = unsafe { a.arg(args, nargs, 1) };
-        let nv_val = a.get_struct_field(opts, "no-verify");
-        a.get_bool(nv_val).unwrap_or(false)
-    } else { false };
-
-    let ca_file: Option<String> = if nargs > 1 {
-        let opts = unsafe { a.arg(args, nargs, 1) };
-        let cf_val = a.get_struct_field(opts, "ca-file");
-        a.get_string(cf_val).map(|s| s.to_string())
-    } else { None };
-
-    let config = match build_client_config(no_verify, ca_file.as_deref()) {
-        Ok(c) => c, Err(e) => return tls_err(ctx, name, e),
+    let opts = match unsafe { ClientOpts::parse(args, nargs, 1) } {
+        Ok(o) => o, Err(e) => return e.into_result(ctx, name),
+    };
+    let config = match opts.build() {
+        Ok(c) => c, Err(e) => return e.into_result(ctx, name),
     };
     let server_name = match rustls::pki_types::ServerName::try_from(hostname.as_str()) {
         Ok(n) => n.to_owned(), Err(e) => return tls_err(ctx, name, format!("invalid hostname: {}", e)),
@@ -254,15 +280,7 @@ extern "C" fn prim_tls_client_state(ctx: *mut ElleCtx, args: *const ElleValue, n
     let conn = match UnbufferedClientConnection::new(config, server_name) {
         Ok(c) => c, Err(e) => return tls_err(ctx, name, e),
     };
-    let state = TlsState {
-        conn: RefCell::new(TlsConnection::Client(conn)),
-        incoming: RefCell::new(Vec::new()),
-        outgoing: RefCell::new(Vec::new()),
-        plaintext: RefCell::new(Vec::new()),
-        handshake_complete: Cell::new(false),
-        close_notify_pending: Cell::new(false),
-    };
-    a.ok(a.external(ctx, "tls-state", state))
+    a.ok(a.external(ctx, "tls-state", TlsState::new(TlsConnection::Client(conn))))
 }
 
 extern "C" fn prim_tls_process(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
@@ -333,6 +351,23 @@ extern "C" fn prim_tls_handshake_complete(ctx: *mut ElleCtx, args: *const ElleVa
     a.ok(a.boolean(state.handshake_complete.get()))
 }
 
+extern "C" fn prim_tls_alpn_protocol(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
+    let a = api();
+    let name = "tls/alpn-protocol";
+    let state = match get_tls_state(ctx, args, nargs, 0, name) { Ok(s) => s, Err(e) => return e };
+    match state.alpn_protocol() {
+        None => a.ok(a.nil()),
+        // RFC 7301 protocol IDs are opaque byte strings, but elle strings are
+        // UTF-8. Every registered protocol is ASCII, so anything else means
+        // the peer selected something this API cannot name — say so rather
+        // than report it as "no protocol agreed".
+        Some(p) => match std::str::from_utf8(&p) {
+            Ok(s) => a.ok(a.string(ctx, s)),
+            Err(_) => tls_err(ctx, name, "peer selected a non-UTF-8 protocol name"),
+        },
+    }
+}
+
 extern "C" fn prim_tls_close_notify(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "tls/close-notify";
@@ -364,112 +399,63 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
         return a.err(ctx, "type-error", &format!("{}: expected bytes or string, got {}", name, a.type_name(v1)));
     };
 
-    let n = data.len();
     let mut conn = state.conn.borrow_mut();
     let mut incoming = state.incoming.borrow_mut();
     let mut outgoing = state.outgoing.borrow_mut();
 
-    loop {
-        match &mut *conn {
-            TlsConnection::Client(c) => {
-                let UnbufferedStatus { discard, state: cs } = c.process_tls_records(&mut incoming);
-                match cs {
-                    Err(e) => { if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, e); }
-                    Ok(ConnectionState::WriteTraffic(mut wt)) => {
-                        if discard > 0 { incoming.drain(..discard); }
-                        let start = outgoing.len();
-                        // Plaintext is split across 16 KiB TLS records, each paying its
-                        // own header + AEAD tag, so ciphertext grows with the RECORD
-                        // COUNT. A flat slack (this was 256 bytes) covers ~11 records
-                        // and silently caps the payload: every larger write then fails.
-                        // Ask rustls for the size it needs instead of guessing.
-                        outgoing.resize(start + n + 256, 0u8);
-                        match wt.encrypt(&data, &mut outgoing[start..]) {
-                            Ok(written) => { outgoing.truncate(start + written); }
-                            Err(EncryptError::InsufficientSize(need)) => {
-                                outgoing.resize(start + need.required_size, 0u8);
-                                match wt.encrypt(&data, &mut outgoing[start..]) {
-                                    Ok(written) => { outgoing.truncate(start + written); }
-                                    // A second InsufficientSize would mean the size
-                                    // rustls asked for is still short; report, no loop.
-                                    Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
-                                }
-                            }
-                            Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
-                        }
-                        break;
+    // Pump the state machine until it offers WriteTraffic, then encrypt.
+    // Both connection kinds run the identical sequence and differ only in
+    // the concrete type fed to process_tls_records, which no object-safe
+    // rustls trait spans — hence a macro rather than a function.
+    macro_rules! write_round {
+        ($raw_conn:expr) => {{
+            let UnbufferedStatus { discard, state: cs } = $raw_conn.process_tls_records(&mut incoming);
+            match cs {
+                Err(e) => { discard_consumed(&mut incoming, discard); return tls_err(ctx, name, e); }
+                Ok(ConnectionState::WriteTraffic(mut wt)) => {
+                    discard_consumed(&mut incoming, discard);
+                    match encrypt_records(&mut wt, &data, &mut outgoing) {
+                        Ok(()) => true,
+                        Err(e) => return tls_err(ctx, name, e),
                     }
-                    Ok(ConnectionState::EncodeTlsData(mut encode)) => {
-                        let start = outgoing.len();
-                        outgoing.resize(start + 16_640, 0u8);
-                        let w = encode.encode(&mut outgoing[start..]);
-                        if discard > 0 { incoming.drain(..discard); }
-                        match w { Ok(written) => { outgoing.truncate(start + written); } Err(e) => return tls_err(ctx, name, format!("encode error: {}", e)) }
-                    }
-                    Ok(ConnectionState::TransmitTlsData(tx)) => { tx.done(); if discard > 0 { incoming.drain(..discard); } }
-                    Ok(ConnectionState::ReadTraffic(mut rt)) => {
-                        let mut pt = state.plaintext.borrow_mut();
-                        while let Some(rec) = rt.next_record() {
-                            match rec { Ok(app) => pt.extend_from_slice(app.payload), Err(e) => { drop(pt); if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, format!("read error: {}", e)); } }
-                        }
-                        drop(pt);
-                        if discard > 0 { incoming.drain(..discard); }
-                    }
-                    Ok(other) => { let msg = format!("{:?}", other); drop(other); if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, format!("unexpected state for write: {}", msg)); }
+                }
+                Ok(ConnectionState::EncodeTlsData(mut encode)) => {
+                    let encoded = encode_record(&mut encode, &mut outgoing);
+                    discard_consumed(&mut incoming, discard);
+                    match encoded { Ok(()) => false, Err(e) => return tls_err(ctx, name, e) }
+                }
+                Ok(ConnectionState::TransmitTlsData(tx)) => {
+                    tx.done();
+                    discard_consumed(&mut incoming, discard);
+                    false
+                }
+                Ok(ConnectionState::ReadTraffic(mut rt)) => {
+                    let mut pt = state.plaintext.borrow_mut();
+                    let taken = take_records(&mut rt, &mut pt);
+                    drop(pt);
+                    discard_consumed(&mut incoming, discard);
+                    match taken { Ok(()) => false, Err(e) => return tls_err(ctx, name, e) }
+                }
+                Ok(other) => {
+                    let msg = format!("{:?}", other);
+                    drop(other);
+                    discard_consumed(&mut incoming, discard);
+                    return tls_err(ctx, name, format!("unexpected state for write: {}", msg));
                 }
             }
-            TlsConnection::Server(s) => {
-                let UnbufferedStatus { discard, state: cs } = s.process_tls_records(&mut incoming);
-                match cs {
-                    Err(e) => { if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, e); }
-                    Ok(ConnectionState::WriteTraffic(mut wt)) => {
-                        if discard > 0 { incoming.drain(..discard); }
-                        let start = outgoing.len();
-                        // Plaintext is split across 16 KiB TLS records, each paying its
-                        // own header + AEAD tag, so ciphertext grows with the RECORD
-                        // COUNT. A flat slack (this was 256 bytes) covers ~11 records
-                        // and silently caps the payload: every larger write then fails.
-                        // Ask rustls for the size it needs instead of guessing.
-                        outgoing.resize(start + n + 256, 0u8);
-                        match wt.encrypt(&data, &mut outgoing[start..]) {
-                            Ok(written) => { outgoing.truncate(start + written); }
-                            Err(EncryptError::InsufficientSize(need)) => {
-                                outgoing.resize(start + need.required_size, 0u8);
-                                match wt.encrypt(&data, &mut outgoing[start..]) {
-                                    Ok(written) => { outgoing.truncate(start + written); }
-                                    // A second InsufficientSize would mean the size
-                                    // rustls asked for is still short; report, no loop.
-                                    Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
-                                }
-                            }
-                            Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
-                        }
-                        break;
-                    }
-                    Ok(ConnectionState::EncodeTlsData(mut encode)) => {
-                        let start = outgoing.len();
-                        outgoing.resize(start + 16_640, 0u8);
-                        let w = encode.encode(&mut outgoing[start..]);
-                        if discard > 0 { incoming.drain(..discard); }
-                        match w { Ok(written) => { outgoing.truncate(start + written); } Err(e) => return tls_err(ctx, name, format!("encode error: {}", e)) }
-                    }
-                    Ok(ConnectionState::TransmitTlsData(tx)) => { tx.done(); if discard > 0 { incoming.drain(..discard); } }
-                    Ok(ConnectionState::ReadTraffic(mut rt)) => {
-                        let mut pt = state.plaintext.borrow_mut();
-                        while let Some(rec) = rt.next_record() {
-                            match rec { Ok(app) => pt.extend_from_slice(app.payload), Err(e) => { drop(pt); if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, format!("read error: {}", e)); } }
-                        }
-                        drop(pt);
-                        if discard > 0 { incoming.drain(..discard); }
-                    }
-                    Ok(other) => { let msg = format!("{:?}", other); drop(other); if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, format!("unexpected state for write: {}", msg)); }
-                }
-            }
-        }
+        }};
     }
 
-    let encrypted: Vec<u8> = std::mem::take(&mut *outgoing);
-    a.ok(a.build_struct(ctx, &[("status", a.keyword("ok")), ("outgoing", a.bytes(ctx, &encrypted))]))
+    loop {
+        let encrypted = match &mut *conn {
+            TlsConnection::Client(c) => write_round!(c),
+            TlsConnection::Server(s) => write_round!(s),
+        };
+        if encrypted { break; }
+    }
+
+    let ciphertext: Vec<u8> = std::mem::take(&mut *outgoing);
+    a.ok(a.build_struct(ctx, &[("status", a.keyword("ok")), ("outgoing", a.bytes(ctx, &ciphertext))]))
 }
 
 extern "C" fn prim_tls_server_config(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
@@ -481,18 +467,11 @@ extern "C" fn prim_tls_server_config(ctx: *mut ElleCtx, args: *const ElleValue, 
     let v1 = unsafe { a.arg(args, nargs, 1) };
     let key_path = match a.get_string(v1) { Some(s) => s.to_string(), None => return a.err(ctx, "type-error", &format!("{}: expected string for key-path, got {}", name, a.type_name(v1))) };
 
-    let cert_data = match std::fs::read(&cert_path) { Ok(d) => d, Err(e) => return io_err(ctx, name, format!("reading cert-path '{}': {}", cert_path, e)) };
-    let mut cert_reader = Cursor::new(&cert_data);
-    let cert_chain: Vec<CertificateDer<'static>> = match CertificateDer::pem_reader_iter(&mut cert_reader).collect::<Result<Vec<_>, _>>() {
-        Ok(c) if !c.is_empty() => c,
-        Ok(_) => return tls_err(ctx, name, format!("no certificates found in '{}'", cert_path)),
-        Err(e) => return tls_err(ctx, name, format!("cert parse error: {}", e)),
+    let opts = match unsafe { ServerOpts::parse(args, nargs, 2) } {
+        Ok(o) => o, Err(e) => return e.into_result(ctx, name),
     };
-    let key_data = match std::fs::read(&key_path) { Ok(d) => d, Err(e) => return io_err(ctx, name, format!("reading key-path '{}': {}", key_path, e)) };
-    let mut key_reader = Cursor::new(&key_data);
-    let private_key = match PrivateKeyDer::from_pem_reader(&mut key_reader) { Ok(k) => k, Err(e) => return tls_err(ctx, name, format!("key parse error in '{}': {}", key_path, e)) };
-    let config = match ServerConfig::builder().with_no_client_auth().with_single_cert(cert_chain, private_key) {
-        Ok(c) => Arc::new(c), Err(e) => return tls_err(ctx, name, format!("server config error: {}", e)),
+    let config = match opts.build(&cert_path, &key_path) {
+        Ok(c) => c, Err(e) => return e.into_result(ctx, name),
     };
     a.ok(a.external(ctx, "tls-server-config", TlsServerConfig { config }))
 }
@@ -509,15 +488,7 @@ extern "C" fn prim_tls_server_state(ctx: *mut ElleCtx, args: *const ElleValue, n
     let conn = match UnbufferedServerConnection::new(Arc::clone(&server_config.config)) {
         Ok(c) => c, Err(e) => return tls_err(ctx, name, e),
     };
-    let state = TlsState {
-        conn: RefCell::new(TlsConnection::Server(conn)),
-        incoming: RefCell::new(Vec::new()),
-        outgoing: RefCell::new(Vec::new()),
-        plaintext: RefCell::new(Vec::new()),
-        handshake_complete: Cell::new(false),
-        close_notify_pending: Cell::new(false),
-    };
-    a.ok(a.external(ctx, "tls-state", state))
+    a.ok(a.external(ctx, "tls-state", TlsState::new(TlsConnection::Server(conn))))
 }
 
 // ---------------------------------------------------------------------------
@@ -526,8 +497,8 @@ extern "C" fn prim_tls_server_state(ctx: *mut ElleCtx, args: *const ElleValue, n
 
 static PRIMITIVES: &[EllePrimDef] = &[
     EllePrimDef::range("tls/client-state", prim_tls_client_state, SIG_ERROR, 1, 2,
-        "Create a TLS client state machine. hostname used for SNI and cert verification.\nopts: {:no-verify bool :ca-file string}", "tls",
-        r#"(tls/client-state "example.com")"#),
+        "Create a TLS client state machine. hostname used for SNI and cert verification.\nopts: {:no-verify bool :ca-file string :client-cert string :client-key string :alpn [string]}", "tls",
+        r#"(tls/client-state "example.com" {:alpn ["h2" "http/1.1"]})"#),
     EllePrimDef::exact("tls/process", prim_tls_process, SIG_ERROR, 2,
         "Feed ciphertext bytes into the TLS state machine.\nReturns status: :handshaking :ready :has-data :peer-closed :closed", "tls",
         r#"(tls/process state (bytes))"#),
@@ -546,12 +517,15 @@ static PRIMITIVES: &[EllePrimDef] = &[
     EllePrimDef::exact("tls/handshake-complete?", prim_tls_handshake_complete, SIG_OK, 1,
         "True if the TLS handshake is complete.", "tls",
         r#"(tls/handshake-complete? state)"#),
+    EllePrimDef::exact("tls/alpn-protocol", prim_tls_alpn_protocol, SIG_ERROR, 1,
+        "The protocol agreed via ALPN, or nil before the handshake completes\nand when no protocol was agreed.", "tls",
+        r#"(tls/alpn-protocol state)"#),
     EllePrimDef::exact("tls/write-plaintext", prim_tls_write_plaintext, SIG_ERROR, 2,
         "Encrypt plaintext data. Only valid after handshake complete.\nReturns {:status :ok :outgoing bytes} or {:status :error :message string}.", "tls",
         r#"(tls/write-plaintext state (bytes "hello"))"#),
     EllePrimDef::range("tls/server-config", prim_tls_server_config, SIG_ERROR, 2, 3,
-        "Build a TLS server config from PEM cert and key files.", "tls",
-        r#"(tls/server-config "cert.pem" "key.pem")"#),
+        "Build a TLS server config from PEM cert and key files.\nopts: {:alpn [string] :client-ca string}", "tls",
+        r#"(tls/server-config "cert.pem" "key.pem" {:alpn ["h2"]})"#),
     EllePrimDef::exact("tls/server-state", prim_tls_server_state, SIG_ERROR, 1,
         "Create a TLS server state machine from a tls-server-config.", "tls",
         r#"(tls/server-state config)"#),

@@ -60,7 +60,8 @@ Load it in Elle:
 |----------|---------|-------------|
 | `tls:connect host port [opts]` | tls-conn | Connect to TLS server |
 | `tls:accept listener config` | tls-conn | Accept TLS connection |
-| `tls:server-config cert key` | tls-server-config | Build server config |
+| `tls:server-config cert key [opts]` | tls-server-config | Build server config |
+| `tls:alpn-protocol conn` | string or nil | Protocol agreed via ALPN |
 | `tls:close conn` | nil | Send close_notify, close TCP |
 
 ### Data transfer
@@ -86,7 +87,26 @@ Load it in Elle:
 {:no-verify  false      # skip cert verification (dev only)
  :ca-file    nil        # path to custom CA bundle
  :client-cert nil       # path to client cert PEM
- :client-key  nil}      # path to client key PEM
+ :client-key  nil       # path to client key PEM
+ :alpn ["http/1.1"]}    # protocols to offer, most preferred first
+```
+
+`:client-cert` and `:client-key` go together; one without the other is an
+error. Pass `:alpn []` to send no ALPN extension.
+
+### Options for `tls:server-config`
+
+```lisp
+{:alpn nil              # protocols accepted, most preferred first
+ :client-ca nil}        # path to CA bundle verifying client certs (mutual TLS)
+```
+
+### HTTP/2 over ALPN
+
+```lisp
+(let [[conn (tls:connect "example.com" 443 {:alpn ["h2" "http/1.1"]})]]
+  (defer (tls:close conn)
+    (println (tls:alpn-protocol conn))))   # => "h2"
 ```
 
 ## Compatibility matrix
