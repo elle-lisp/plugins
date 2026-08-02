@@ -45,12 +45,10 @@ pub struct TlsServerConfig {
 
 elle_plugin::define_plugin!("tls/", &PRIMITIVES);
 
-// We need to install the ring crypto provider at init time.
-// The define_plugin! macro generates elle_plugin_init. We need a way to
-// run code at init. We'll use a static initializer workaround:
-// actually, the define_plugin! init function runs before any prims are called,
-// but it doesn't have a hook for custom init code. We'll install the provider
-// lazily on first use instead.
+// rustls needs a process-global crypto provider before any connection or
+// config is built. define_plugin! generates elle_plugin_init and offers no
+// hook for custom init code, so install the provider on first use instead.
+// Every call after the first returns Err, which is what we want to ignore.
 fn ensure_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }

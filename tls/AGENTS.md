@@ -101,9 +101,12 @@ pub struct TlsServerConfig {
    `port/close` on the TCP port. `lib/tls.lisp`'s `tls/close` does this
    automatically.
 
-6. **Crypto provider is global.** `ring::default_provider().install_default()`
-   is called in `elle_plugin_init`. The second call (if the plugin is loaded
-   twice, which cannot happen) returns `Err` which is ignored.
+6. **Crypto provider is global.** `define_plugin!` generates
+   `elle_plugin_init` and offers no hook for custom init code, so
+   `ring::default_provider().install_default()` runs lazily instead —
+   `ensure_provider()` at the top of every primitive that builds a
+   connection or a config. Every call after the first returns `Err`,
+   which is ignored.
 
 7. **Server config is immutable after creation.** `TlsServerConfig` wraps
    `Arc<ServerConfig>`. Multiple `tls/server-state` calls clone the Arc cheaply.
@@ -122,3 +125,4 @@ pub struct TlsServerConfig {
 |------|---------|
 | `Cargo.toml` | Crate definition (cdylib, dependencies) |
 | `src/lib.rs` | All primitives, structs, entry point |
+| `../tests/tls.lisp` | Integration tests — a client and a server state machine wired to each other in process, no sockets |

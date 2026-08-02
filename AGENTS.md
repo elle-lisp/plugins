@@ -33,14 +33,18 @@ existing plugins.
 
 ### Writing a plugin
 
+Every primitive takes an opaque per-call `ctx` as its first argument and
+passes it, unchanged, into any allocating constructor so the result lands
+in the call's region on the call's heap.
+
 ```rust
-use elle_plugin::{ElleResult, ElleValue, EllePrimDef, SIG_OK};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK};
 
 elle_plugin::define_plugin!("myplugin/", &PRIMITIVES);
 
-extern "C" fn prim_hello(args: *const ElleValue, nargs: usize) -> ElleResult {
+extern "C" fn prim_hello(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    a.ok(a.string("hello"))
+    a.ok(a.string(ctx, "hello"))
 }
 
 static PRIMITIVES: &[EllePrimDef] = &[
