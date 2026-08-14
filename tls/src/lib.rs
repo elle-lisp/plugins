@@ -140,7 +140,14 @@ macro_rules! handle_conn_state {
                 $outgoing.resize(start + 16_640, 0u8);
                 let written = match encode.encode(&mut $outgoing[start..]) {
                     Ok(w) => w,
-                    Err(e) => return Err(tls_err($ctx, "tls/process", format!("encode error: {}", e))),
+                    // Cut the speculative resize back: its zero-fill is
+                    // indistinguishable from ciphertext to whoever drains
+                    // `outgoing` next, and reaches the peer as a record with
+                    // content type 0.
+                    Err(e) => {
+                        $outgoing.truncate(start);
+                        return Err(tls_err($ctx, "tls/process", format!("encode error: {}", e)));
+                    }
                 };
                 $outgoing.truncate(start + written);
                 None
@@ -345,6 +352,57 @@ extern "C" fn prim_tls_close_notify(ctx: *mut ElleCtx, args: *const ElleValue, n
     a.ok(a.build_struct(ctx, &[("outgoing", a.bytes(ctx, &outgoing))]))
 }
 
+/// Encrypt `data` into the tail of `outgoing`, growing the buffer to the size
+/// rustls asks for.
+///
+/// `encrypt` splits the plaintext across TLS records — one per 16 KiB — and
+/// every record costs a header and an AEAD tag on top of its share of the
+/// payload. A buffer sized from the plaintext length plus a fixed margin is
+/// therefore correct only while the payload stays inside a handful of records,
+/// and runs short once it spans enough of them. rustls reports the exact
+/// requirement rather than writing a partial record, so the requirement is
+/// what the retry uses; the first estimate only decides whether a retry is
+/// needed at all.
+///
+/// A retry is safe: rustls checks the size before it touches the buffer or the
+/// record layer, and documents that `outgoing_tls` is unmodified on error.
+///
+/// On failure the buffer is cut back to where it started. The speculative
+/// resize zero-fills, and those zeros are indistinguishable from ciphertext to
+/// a caller that later drains `outgoing` — the peer reads a record with content
+/// type 0 and drops the connection as corrupt, instead of seeing the clean
+/// error this returns.
+fn encrypt_all<Data>(
+    wt: &mut rustls::unbuffered::WriteTraffic<'_, Data>,
+    data: &[u8],
+    outgoing: &mut Vec<u8>,
+) -> Result<(), String> {
+    let start = outgoing.len();
+    outgoing.resize(start + data.len() + 256, 0u8);
+    let required = match wt.encrypt(data, &mut outgoing[start..]) {
+        Ok(written) => {
+            outgoing.truncate(start + written);
+            return Ok(());
+        }
+        Err(rustls::unbuffered::EncryptError::InsufficientSize(e)) => e.required_size,
+        Err(e) => {
+            outgoing.truncate(start);
+            return Err(format!("encrypt error: {}", e));
+        }
+    };
+    outgoing.resize(start + required, 0u8);
+    match wt.encrypt(data, &mut outgoing[start..]) {
+        Ok(written) => {
+            outgoing.truncate(start + written);
+            Ok(())
+        }
+        Err(e) => {
+            outgoing.truncate(start);
+            Err(format!("encrypt error: {}", e))
+        }
+    }
+}
+
 extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let name = "tls/write-plaintext";
@@ -366,7 +424,6 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
         return a.err(ctx, "type-error", &format!("{}: expected bytes or string, got {}", name, a.type_name(v1)));
     };
 
-    let n = data.len();
     let mut conn = state.conn.borrow_mut();
     let mut incoming = state.incoming.borrow_mut();
     let mut outgoing = state.outgoing.borrow_mut();
@@ -379,11 +436,8 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
                     Err(e) => { if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, e); }
                     Ok(ConnectionState::WriteTraffic(mut wt)) => {
                         if discard > 0 { incoming.drain(..discard); }
-                        let start = outgoing.len();
-                        outgoing.resize(start + n + 256, 0u8);
-                        match wt.encrypt(&data, &mut outgoing[start..]) {
-                            Ok(written) => { outgoing.truncate(start + written); }
-                            Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
+                        if let Err(e) = encrypt_all(&mut wt, &data, &mut outgoing) {
+                            return tls_err(ctx, name, e);
                         }
                         break;
                     }
@@ -392,7 +446,10 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
                         outgoing.resize(start + 16_640, 0u8);
                         let w = encode.encode(&mut outgoing[start..]);
                         if discard > 0 { incoming.drain(..discard); }
-                        match w { Ok(written) => { outgoing.truncate(start + written); } Err(e) => return tls_err(ctx, name, format!("encode error: {}", e)) }
+                        // Cut the speculative resize back on failure: its zero-fill is
+                        // indistinguishable from ciphertext to whoever drains `outgoing`
+                        // next, and reaches the peer as a record with content type 0.
+                        match w { Ok(written) => { outgoing.truncate(start + written); } Err(e) => { outgoing.truncate(start); return tls_err(ctx, name, format!("encode error: {}", e)) } }
                     }
                     Ok(ConnectionState::TransmitTlsData(tx)) => { tx.done(); if discard > 0 { incoming.drain(..discard); } }
                     Ok(ConnectionState::ReadTraffic(mut rt)) => {
@@ -412,11 +469,8 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
                     Err(e) => { if discard > 0 { incoming.drain(..discard); } return tls_err(ctx, name, e); }
                     Ok(ConnectionState::WriteTraffic(mut wt)) => {
                         if discard > 0 { incoming.drain(..discard); }
-                        let start = outgoing.len();
-                        outgoing.resize(start + n + 256, 0u8);
-                        match wt.encrypt(&data, &mut outgoing[start..]) {
-                            Ok(written) => { outgoing.truncate(start + written); }
-                            Err(e) => return tls_err(ctx, name, format!("encrypt error: {}", e)),
+                        if let Err(e) = encrypt_all(&mut wt, &data, &mut outgoing) {
+                            return tls_err(ctx, name, e);
                         }
                         break;
                     }
@@ -425,7 +479,10 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
                         outgoing.resize(start + 16_640, 0u8);
                         let w = encode.encode(&mut outgoing[start..]);
                         if discard > 0 { incoming.drain(..discard); }
-                        match w { Ok(written) => { outgoing.truncate(start + written); } Err(e) => return tls_err(ctx, name, format!("encode error: {}", e)) }
+                        // Cut the speculative resize back on failure: its zero-fill is
+                        // indistinguishable from ciphertext to whoever drains `outgoing`
+                        // next, and reaches the peer as a record with content type 0.
+                        match w { Ok(written) => { outgoing.truncate(start + written); } Err(e) => { outgoing.truncate(start); return tls_err(ctx, name, format!("encode error: {}", e)) } }
                     }
                     Ok(ConnectionState::TransmitTlsData(tx)) => { tx.done(); if discard > 0 { incoming.drain(..discard); } }
                     Ok(ConnectionState::ReadTraffic(mut rt)) => {
