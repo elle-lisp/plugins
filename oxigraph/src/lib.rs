@@ -752,7 +752,7 @@ static PRIMITIVES: &[EllePrimDef] = &[
         "Create a new in-memory RDF store.", "oxigraph", "(oxigraph/store-new)"),
     EllePrimDef::exact("oxigraph/store-open", prim_store_open, SIG_ERROR, 1,
         "Open a persistent on-disk RDF store at the given path.", "oxigraph",
-        r#"(oxigraph/store-open "/tmp/my-graph")"#),
+        r#"(oxigraph/store-open (path/join (file/mktempdir) "my-graph"))"#),
     EllePrimDef::exact("oxigraph/iri", prim_iri, SIG_ERROR, 1,
         "Construct and validate an IRI term. Returns [:iri \"http://...\"].", "oxigraph",
         r#"(oxigraph/iri "http://example.org/alice")"#),
