@@ -334,18 +334,23 @@ message Empty {
 
 ## ── Repeated fields: empty array ────────────────────────────────────
 
-## In proto3, an empty repeated field is the default — it won't appear
-## in the decoded message (has_field returns false). Encode should still
-## succeed; decode just omits the field.
+## An empty repeated field is absent from the wire in proto3. It must
+## still decode to an empty array, never to nil.
 (def rep-empty {:ints []})
 (def rep-empty-buf (encode-fn pool "Repeats" rep-empty))
 (assert (bytes? rep-empty-buf) "empty repeated array encodes to bytes")
+(def rep-empty-dec (decode-fn pool "Repeats" rep-empty-buf))
+(assert (array? (get rep-empty-dec :ints)) "empty repeated array decodes to an array")
+(assert (= (length (get rep-empty-dec :ints)) 0) "empty repeated array decodes to length 0")
 
 ## ── Repeated fields: empty list ─────────────────────────────────────
 
 (def rep-empty-list {:ints (list)})
 (def rep-el-buf (encode-fn pool "Repeats" rep-empty-list))
 (assert (bytes? rep-el-buf) "empty repeated list encodes to bytes")
+(def rep-el-dec (decode-fn pool "Repeats" rep-el-buf))
+(assert (array? (get rep-el-dec :ints)) "empty repeated list decodes to an array")
+(assert (= (length (get rep-el-dec :ints)) 0) "empty repeated list decodes to length 0")
 
 ## ── Repeated bytes field ────────────────────────────────────────────
 
@@ -441,12 +446,47 @@ message Empty {
 (def empty-dec (decode-fn pool "Empty" empty-buf))
 (assert (struct? empty-dec) "Empty message decode returns struct")
 
-## ── Omitted fields (nil) ────────────────────────────────────────────
+## ── proto3 default values ───────────────────────────────────────────
 
-## Fields set to nil should be omitted (proto3 default behavior)
+## Trap: has_field() reports false for a proto3 field that holds its
+## default, because proto3 keeps defaults off the wire. A decoder that
+## gates on has_field() drops those fields and Elle sees nil.
+## Counter-factual: (get sparse-dec :age) => nil looked harmless, but it
+## breaks every (= field 0) test the caller writes.
+
 (def sparse {:name "Sparse"})
 (def sparse-dec (decode-fn pool "Person" (encode-fn pool "Person" sparse)))
 (assert (= (get sparse-dec :name) "Sparse") "sparse Person: name present")
+(assert (= (get sparse-dec :age) 0) "sparse Person: omitted int32 decodes as 0")
+(assert (array? (get sparse-dec :tags)) "sparse Person: omitted repeated decodes as array")
+(assert (= (length (get sparse-dec :tags)) 0) "sparse Person: omitted repeated is empty")
+(assert (= (get sparse-dec :status) :UNKNOWN) "sparse Person: omitted enum decodes as zero value")
+(assert (struct? (get sparse-dec :scores)) "sparse Person: omitted map decodes as struct")
+
+## Every scalar type at its default.
+(def zero-dec (decode-fn pool "Scalars" (encode-fn pool "Scalars" {})))
+(assert (= (get zero-dec :i32) 0) "default int32 is 0")
+(assert (= (get zero-dec :i64) 0) "default int64 is 0")
+(assert (= (get zero-dec :u32) 0) "default uint32 is 0")
+(assert (= (get zero-dec :u64) 0) "default uint64 is 0")
+(assert (= (get zero-dec :si32) 0) "default sint32 is 0")
+(assert (= (get zero-dec :si64) 0) "default sint64 is 0")
+(assert (= (get zero-dec :fx32) 0) "default fixed32 is 0")
+(assert (= (get zero-dec :fx64) 0) "default fixed64 is 0")
+(assert (= (get zero-dec :sfx32) 0) "default sfixed32 is 0")
+(assert (= (get zero-dec :sfx64) 0) "default sfixed64 is 0")
+(assert (< (abs (get zero-dec :f)) 0.0001) "default float is 0.0")
+(assert (< (abs (get zero-dec :d)) 0.0001) "default double is 0.0")
+(assert (= (get zero-dec :b) false) "default bool is false")
+(assert (= (get zero-dec :s) "") "default string is empty")
+(assert (bytes? (get zero-dec :raw)) "default bytes decodes as bytes")
+(assert (= (length (get zero-dec :raw)) 0) "default bytes is empty")
+
+## An omitted message field decodes to a struct of defaults, not nil.
+(def nested-zero-dec (decode-fn pool "Nested" (encode-fn pool "Nested" {})))
+(assert (struct? (get nested-zero-dec :person)) "omitted message field decodes as struct")
+(assert (= (get (get nested-zero-dec :person) :name) "") "omitted message field: default string")
+(assert (= (get (get nested-zero-dec :person) :age) 0) "omitted message field: default int32")
 
 ## ── Deeply nested repeated ──────────────────────────────────────────
 
