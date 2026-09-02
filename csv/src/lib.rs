@@ -255,7 +255,7 @@ extern "C" fn prim_csv_write(ctx: *mut ElleCtx, args: *const ElleValue, nargs: u
                 ),
             );
         }
-        let entries = a.struct_entries(first);
+        let entries = a.struct_entries(ctx, first);
         let headers: Vec<&str> = entries.iter().map(|(k, _)| *k).collect();
 
         // Write header row

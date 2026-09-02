@@ -53,14 +53,14 @@ fn get_prop_str(props: ElleValue, key: &str) -> Option<String> {
     a.get_string(v).map(|s| s.to_string())
 }
 
-fn get_prop_keyword(props: ElleValue, key: &str) -> Option<String> {
+fn get_prop_keyword(ctx: *mut ElleCtx, props: ElleValue, key: &str) -> Option<String> {
     let a = api();
     let v = a.get_struct_field(props, key);
-    a.get_keyword_name(v).map(|s| s.to_string())
+    a.get_keyword_name(ctx, v).map(|s| s.to_string())
 }
 
-fn get_prop_id(props: ElleValue) -> Option<String> {
-    get_prop_keyword(props, "id").or_else(|| get_prop_str(props, "id"))
+fn get_prop_id(ctx: *mut ElleCtx, props: ElleValue) -> Option<String> {
+    get_prop_keyword(ctx, props, "id").or_else(|| get_prop_str(props, "id"))
 }
 
 fn get_prop_float(props: ElleValue, key: &str) -> Option<f64> {
@@ -75,14 +75,14 @@ fn get_prop_int(props: ElleValue, key: &str) -> Option<i64> {
     a.get_int(v)
 }
 
-pub fn value_to_node(val: ElleValue) -> Result<UiNode, String> {
+pub fn value_to_node(ctx: *mut ElleCtx, val: ElleValue) -> Result<UiNode, String> {
     let a = api();
     let len = a.get_array_len(val)
         .ok_or_else(|| format!("ui node must be an array, got {}", a.type_name(val)))?;
     if len == 0 { return Err("ui node array must not be empty".into()); }
 
     let first = a.get_array_item(val, 0);
-    let tag = a.get_keyword_name(first)
+    let tag = a.get_keyword_name(ctx, first)
         .ok_or("first element of ui node must be a keyword")?
         .to_string();
 
@@ -122,33 +122,33 @@ pub fn value_to_node(val: ElleValue) -> Result<UiNode, String> {
         "separator" => Ok(UiNode::Separator),
         "spacer" => { let size = get_prop_float(props_v, "size").unwrap_or(8.0) as f32; Ok(UiNode::Spacer { size }) }
         "button" => {
-            let id = get_prop_id(props_v).ok_or("button requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("button requires :id")?;
             let text = if rest_count > 0 { a.get_string(rest_item(0)).unwrap_or("").to_string() } else { String::new() };
             Ok(UiNode::Button { id, text })
         }
         "text-input" => {
-            let id = get_prop_id(props_v).ok_or("text-input requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("text-input requires :id")?;
             let hint = get_prop_str(props_v, "hint");
             Ok(UiNode::TextInput { id, hint })
         }
         "text-edit" => {
-            let id = get_prop_id(props_v).ok_or("text-edit requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("text-edit requires :id")?;
             let desired_rows = get_prop_int(props_v, "rows").unwrap_or(4) as usize;
             Ok(UiNode::TextEdit { id, desired_rows })
         }
         "checkbox" => {
-            let id = get_prop_id(props_v).ok_or("checkbox requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("checkbox requires :id")?;
             let text = if rest_count > 0 { a.get_string(rest_item(0)).unwrap_or("").to_string() } else { String::new() };
             Ok(UiNode::Checkbox { id, text })
         }
         "slider" => {
-            let id = get_prop_id(props_v).ok_or("slider requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("slider requires :id")?;
             let min = get_prop_float(props_v, "min").unwrap_or(0.0);
             let max = get_prop_float(props_v, "max").unwrap_or(100.0);
             Ok(UiNode::Slider { id, min, max })
         }
         "combo-box" => {
-            let id = get_prop_id(props_v).ok_or("combo-box requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("combo-box requires :id")?;
             let options: Vec<String> = if rest_count > 0 {
                 let arr_v = rest_item(0);
                 let arr_len = a.get_array_len(arr_v).unwrap_or(0);
@@ -156,26 +156,26 @@ pub fn value_to_node(val: ElleValue) -> Result<UiNode, String> {
             } else { Vec::new() };
             Ok(UiNode::ComboBox { id, options })
         }
-        "v-layout" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect(); Ok(UiNode::VLayout { children: children? }) }
-        "h-layout" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect(); Ok(UiNode::HLayout { children: children? }) }
-        "centered" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect(); Ok(UiNode::Centered { children: children? }) }
-        "centered-justified" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect(); Ok(UiNode::CenteredJustified { children: children? }) }
+        "v-layout" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::VLayout { children: children? }) }
+        "h-layout" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::HLayout { children: children? }) }
+        "centered" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::Centered { children: children? }) }
+        "centered-justified" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::CenteredJustified { children: children? }) }
         "scroll-area" => {
-            let id = get_prop_id(props_v).ok_or("scroll-area requires :id")?;
-            let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect();
+            let id = get_prop_id(ctx, props_v).ok_or("scroll-area requires :id")?;
+            let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect();
             Ok(UiNode::ScrollArea { id, children: children? })
         }
         "collapsing" => {
-            let id = get_prop_id(props_v).ok_or("collapsing requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("collapsing requires :id")?;
             let title = if rest_count > 0 { a.get_string(rest_item(0)).unwrap_or("").to_string() } else { String::new() };
-            let children: Result<Vec<_>, _> = (1..rest_count).map(|i| value_to_node(rest_item(i))).collect();
+            let children: Result<Vec<_>, _> = (1..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect();
             Ok(UiNode::Collapsing { id, title, children: children? })
         }
-        "group" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect(); Ok(UiNode::Group { children: children? }) }
+        "group" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::Group { children: children? }) }
         "grid" => {
-            let id = get_prop_id(props_v).ok_or("grid requires :id")?;
+            let id = get_prop_id(ctx, props_v).ok_or("grid requires :id")?;
             let columns = get_prop_int(props_v, "columns").unwrap_or(2) as usize;
-            let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(rest_item(i))).collect();
+            let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect();
             Ok(UiNode::Grid { id, columns, children: children? })
         }
         other => Err(format!("unknown ui node type: :{}", other)),
@@ -186,10 +186,10 @@ pub fn value_to_tree(ctx: *mut ElleCtx, val: ElleValue) -> Result<Vec<UiNode>, E
     let a = api();
     if let Some(len) = a.get_array_len(val) {
         if len > 0 && a.check_keyword(a.get_array_item(val, 0)) {
-            let node = value_to_node(val).map_err(|e| a.err(ctx, "ui-error", &e))?;
+            let node = value_to_node(ctx, val).map_err(|e| a.err(ctx, "ui-error", &e))?;
             return Ok(vec![node]);
         }
-        (0..len).map(|i| value_to_node(a.get_array_item(val, i)).map_err(|e| a.err(ctx, "ui-error", &e))).collect()
+        (0..len).map(|i| value_to_node(ctx, a.get_array_item(val, i)).map_err(|e| a.err(ctx, "ui-error", &e))).collect()
     } else {
         Err(a.err(ctx, "type-error", "egui/frame: tree must be an array"))
     }
@@ -285,7 +285,7 @@ fn render_node(ui: &mut egui::Ui, node: &UiNode, state: &mut WidgetState, ix: &m
 pub fn interactions_to_value(ctx: *mut ElleCtx, ix: &Interactions) -> ElleValue {
     let a = api();
 
-    let clicks: Vec<ElleValue> = ix.clicked.iter().map(|s| a.keyword(s)).collect();
+    let clicks: Vec<ElleValue> = ix.clicked.iter().map(|s| a.keyword(ctx, s)).collect();
     let clicks_set = a.set(ctx, &clicks);
 
     let text_fields: Vec<(&str, ElleValue)> = ix.text_values.iter().map(|(k, v)| (k.as_str(), a.string(ctx, v))).collect();

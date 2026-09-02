@@ -114,7 +114,7 @@ pub fn extract_color(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<im
 
 pub fn parse_format(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<image::ImageFormat, ElleResult> {
     let a = api();
-    let kw = a.get_keyword_name(val).ok_or_else(|| {
+    let kw = a.get_keyword_name(ctx, val).ok_or_else(|| {
         a.err(ctx, "type-error", &format!("{}: format must be a keyword, got {}", name, a.type_name(val)))
     })?;
     match kw {

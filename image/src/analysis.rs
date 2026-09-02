@@ -32,7 +32,7 @@ pub(crate) extern "C" fn prim_edges(ctx: *mut ElleCtx, args: *const ElleValue, n
     let a = api();
     let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/edges") { Ok(i) => i, Err(e) => return e };
     let algo = if nargs > 1 {
-        a.get_keyword_name(unsafe { a.arg(args, nargs, 1) }).unwrap_or("canny")
+        a.get_keyword_name(ctx, unsafe { a.arg(args, nargs, 1) }).unwrap_or("canny")
     } else { "canny" };
     let gray = img.to_luma8();
     let result = match algo {

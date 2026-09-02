@@ -47,7 +47,7 @@ enum Mode {
 // Encode helpers
 // ---------------------------------------------------------------------------
 
-fn encode_value(buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), String> {
+fn encode_value(ctx: *mut ElleCtx, buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), String> {
     let a = api();
     if a.check_nil(val) {
         rmp::encode::write_nil(buf).unwrap();
@@ -57,7 +57,7 @@ fn encode_value(buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), Str
         rmp::encode::write_sint(buf, n).unwrap();
     } else if let Some(f) = a.get_float(val) {
         rmp::encode::write_f64(buf, f).unwrap();
-    } else if let Some(name) = a.get_keyword_name(val) {
+    } else if let Some(name) = a.get_keyword_name(ctx, val) {
         match mode {
             Mode::Interop => {
                 rmp::encode::write_str(buf, name).unwrap();
@@ -78,10 +78,10 @@ fn encode_value(buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), Str
         rmp::encode::write_array_len(buf, len as u32).unwrap();
         for i in 0..len {
             let elem = a.get_array_item(val, i);
-            encode_value(buf, elem, mode)?;
+            encode_value(ctx, buf, elem, mode)?;
         }
     } else if a.check_struct(val) {
-        let entries = a.struct_entries(val);
+        let entries = a.struct_entries(ctx, val);
         rmp::encode::write_map_len(buf, entries.len() as u32).unwrap();
         for (key, field_val) in entries {
             match mode {
@@ -95,7 +95,7 @@ fn encode_value(buf: &mut Vec<u8>, val: ElleValue, mode: Mode) -> Result<(), Str
                     buf.extend_from_slice(&payload);
                 }
             }
-            encode_value(buf, field_val, mode)?;
+            encode_value(ctx, buf, field_val, mode)?;
         }
     } else {
         let prim_name = if mode == Mode::Tagged {
@@ -395,7 +395,7 @@ fn decode_ext(
         EXT_KEYWORD => {
             let name_val = decode_value(ctx, &mut payload.as_slice(), mode)?;
             match a.get_string(name_val) {
-                Some(name) => Ok(a.keyword(name)),
+                Some(name) => Ok(a.keyword(ctx, name)),
                 None => Err(format!(
                     "msgpack/{}: ext(1) keyword payload must be a string, got {}",
                     prim_name,
@@ -653,7 +653,7 @@ extern "C" fn prim_msgpack_encode(ctx: *mut ElleCtx, args: *const ElleValue, nar
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let mut buf = Vec::new();
-    match encode_value(&mut buf, val, Mode::Interop) {
+    match encode_value(ctx, &mut buf, val, Mode::Interop) {
         Ok(()) => a.ok(a.bytes(ctx, &buf)),
         Err(msg) => a.err(ctx, "msgpack-error", &msg),
     }
@@ -710,7 +710,7 @@ extern "C" fn prim_msgpack_encode_tagged(ctx: *mut ElleCtx, args: *const ElleVal
     let a = api();
     let val = unsafe { a.arg(args, nargs, 0) };
     let mut buf = Vec::new();
-    match encode_value(&mut buf, val, Mode::Tagged) {
+    match encode_value(ctx, &mut buf, val, Mode::Tagged) {
         Ok(()) => a.ok(a.bytes(ctx, &buf)),
         Err(msg) => a.err(ctx, "msgpack-error", &msg),
     }

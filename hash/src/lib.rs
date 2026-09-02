@@ -275,7 +275,7 @@ extern "C" fn prim_hex(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) 
         );
     }
     let arg0 = unsafe { a.arg(args, nargs, 0) };
-    let kw = match a.get_keyword_name(arg0) {
+    let kw = match a.get_keyword_name(ctx, arg0) {
         Some(k) => k.to_string(),
         None => {
             return a.err(
@@ -320,7 +320,7 @@ extern "C" fn prim_algorithms(
     let a = api();
     let elems: Vec<ElleValue> = ALGORITHM_NAMES
         .iter()
-        .map(|name| a.keyword(name))
+        .map(|name| a.keyword(ctx, name))
         .collect();
     a.ok(a.set(ctx, &elems))
 }
@@ -480,7 +480,7 @@ extern "C" fn prim_hash_new(ctx: *mut ElleCtx, args: *const ElleValue, nargs: us
         );
     }
     let arg0 = unsafe { a.arg(args, nargs, 0) };
-    let kw = match a.get_keyword_name(arg0) {
+    let kw = match a.get_keyword_name(ctx, arg0) {
         Some(k) => k.to_string(),
         None => {
             return a.err(

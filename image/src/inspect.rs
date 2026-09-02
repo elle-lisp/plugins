@@ -26,7 +26,7 @@ pub(crate) extern "C" fn prim_dimensions(ctx: *mut ElleCtx, args: *const ElleVal
 pub(crate) extern "C" fn prim_color_type(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let r = match get_image_ref(ctx, unsafe { a.arg(args, nargs, 0) }, "image/color-type") { Ok(r) => r, Err(e) => return e };
-    a.ok(a.keyword(r.with(color_type_keyword)))
+    a.ok(a.keyword(ctx, r.with(color_type_keyword)))
 }
 
 pub(crate) extern "C" fn prim_pixels(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
@@ -40,7 +40,7 @@ pub(crate) extern "C" fn prim_from_pixels(ctx: *mut ElleCtx, args: *const ElleVa
     let w = match require_int(ctx, unsafe { a.arg(args, nargs, 0) }, "image/from-pixels", "width") { Ok(v) => v as u32, Err(e) => return e };
     let h = match require_int(ctx, unsafe { a.arg(args, nargs, 1) }, "image/from-pixels", "height") { Ok(v) => v as u32, Err(e) => return e };
     let v2 = unsafe { a.arg(args, nargs, 2) };
-    let fmt_kw = match a.get_keyword_name(v2) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/from-pixels: format must be keyword, got {}", a.type_name(v2))) };
+    let fmt_kw = match a.get_keyword_name(ctx, v2) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/from-pixels: format must be keyword, got {}", a.type_name(v2))) };
     let v3 = unsafe { a.arg(args, nargs, 3) };
     let data = match a.get_bytes(v3) { Some(b) => b.to_vec(), None => return a.err(ctx, "type-error", &format!("image/from-pixels: data must be bytes, got {}", a.type_name(v3))) };
     let result = match fmt_kw {
@@ -111,7 +111,7 @@ pub(crate) extern "C" fn prim_new(ctx: *mut ElleCtx, args: *const ElleValue, nar
     let w = match require_int(ctx, unsafe { a.arg(args, nargs, 0) }, "image/new", "width") { Ok(v) => v as u32, Err(e) => return e };
     let h = match require_int(ctx, unsafe { a.arg(args, nargs, 1) }, "image/new", "height") { Ok(v) => v as u32, Err(e) => return e };
     let v2 = unsafe { a.arg(args, nargs, 2) };
-    let fmt_kw = match a.get_keyword_name(v2) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/new: format must be keyword, got {}", a.type_name(v2))) };
+    let fmt_kw = match a.get_keyword_name(ctx, v2) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/new: format must be keyword, got {}", a.type_name(v2))) };
     match parse_color_type(fmt_kw) {
         Some(ctor) => a.ok(wrap_image_mut(ctx, ctor(w, h))),
         None => a.err(ctx, "value-error", &format!("image/new: unsupported format :{}", fmt_kw)),
