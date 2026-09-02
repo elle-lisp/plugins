@@ -94,7 +94,7 @@ fn value_to_yaml(ctx: *mut ElleCtx, v: ElleValue, name: &str) -> Result<serde_ya
     }
     // Struct — keyword keys become YAML mapping string keys
     if a.check_struct(v) {
-        let entries = a.struct_entries(v);
+        let entries = a.struct_entries(ctx, v);
         let mut map = serde_yaml_ng::Mapping::new();
         for (key, field_val) in entries {
             let yaml_key = serde_yaml_ng::Value::String(key.to_string());

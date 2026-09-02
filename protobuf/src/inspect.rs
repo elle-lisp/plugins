@@ -64,8 +64,8 @@ pub fn prim_fields(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> E
             let mut kvs: Vec<(&str, ElleValue)> = vec![
                 ("name", a.string(ctx, f.name())),
                 ("number", a.int(f.number() as i64)),
-                ("type", a.keyword(type_kw)),
-                ("label", a.keyword(label_kw)),
+                ("type", a.keyword(ctx, type_kw)),
+                ("label", a.keyword(ctx, label_kw)),
             ];
 
             let message_type_opt = match &f.kind() {

@@ -100,7 +100,7 @@ extern "C" fn prim_set_text(ctx: *mut ElleCtx, args: *const ElleValue, nargs: us
     let a = api();
     let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-text", format!("id must be a keyword, got {}", a.type_name(v1))) };
+    let id = match a.get_keyword_name(ctx, v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-text", format!("id must be a keyword, got {}", a.type_name(v1))) };
     let v2 = unsafe { a.arg(args, nargs, 2) };
     let val = match a.get_string(v2) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-text", format!("value must be a string, got {}", a.type_name(v2))) };
     state.borrow_mut().widget_state.text_buffers.insert(id, val);
@@ -111,7 +111,7 @@ extern "C" fn prim_set_check(ctx: *mut ElleCtx, args: *const ElleValue, nargs: u
     let a = api();
     let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-check", "id must be a keyword") };
+    let id = match a.get_keyword_name(ctx, v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-check", "id must be a keyword") };
     let v2 = unsafe { a.arg(args, nargs, 2) };
     let val = match a.get_bool(v2) { Some(b) => b, None => return egui_err(ctx, "egui/set-check", "value must be a boolean") };
     state.borrow_mut().widget_state.check_states.insert(id, val);
@@ -122,7 +122,7 @@ extern "C" fn prim_set_slider(ctx: *mut ElleCtx, args: *const ElleValue, nargs: 
     let a = api();
     let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-slider", "id must be a keyword") };
+    let id = match a.get_keyword_name(ctx, v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-slider", "id must be a keyword") };
     let v2 = unsafe { a.arg(args, nargs, 2) };
     let val = a.get_float(v2).or_else(|| a.get_int(v2).map(|i| i as f64));
     match val {
@@ -145,7 +145,7 @@ extern "C" fn prim_set_combo(ctx: *mut ElleCtx, args: *const ElleValue, nargs: u
     let a = api();
     let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let id = match a.get_keyword_name(v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-combo", "id must be a keyword") };
+    let id = match a.get_keyword_name(ctx, v1) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-combo", "id must be a keyword") };
     let v2 = unsafe { a.arg(args, nargs, 2) };
     let val = match a.get_string(v2) { Some(s) => s.to_string(), None => return egui_err(ctx, "egui/set-combo", "value must be a string") };
     state.borrow_mut().widget_state.combo_states.insert(id, val);

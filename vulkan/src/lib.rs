@@ -25,9 +25,9 @@ fn get_shader<'a>(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<&'a G
         .ok_or_else(|| a.err(ctx, "type-error", &format!("{name}: expected vulkan-shader, got {}", a.type_name(val))))
 }
 
-fn extract_keyword(val: ElleValue) -> Option<String> {
+fn extract_keyword(ctx: *mut ElleCtx, val: ElleValue) -> Option<String> {
     let a = api();
-    a.get_keyword_name(val).map(|s| s.to_string())
+    a.get_keyword_name(ctx, val).map(|s| s.to_string())
 }
 
 fn struct_get(val: ElleValue, key: &str) -> Option<ElleValue> {
@@ -292,7 +292,7 @@ fn parse_buffer_spec(
         a.err(ctx, "value-error", &format!("{caller}: buffer[{index}] missing :usage"))
     })?;
 
-    let usage = match extract_keyword(usage_val) {
+    let usage = match extract_keyword(ctx, usage_val) {
         Some(ref k) if k == "input" => BufferUsage::Input,
         Some(ref k) if k == "output" => BufferUsage::Output,
         Some(ref k) if k == "inout" => BufferUsage::InOut,
@@ -327,7 +327,7 @@ fn parse_buffer_spec(
     })?;
 
     let dtype = struct_get(val, "dtype")
-        .and_then(extract_keyword)
+        .and_then(|v| extract_keyword(ctx, v))
         .unwrap_or_else(|| "f32".to_string());
 
     let elem_size = if dtype == "i64" { 8 } else { 4 };
@@ -391,7 +391,7 @@ extern "C" fn prim_decode(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usiz
     };
 
     let dtype_val = unsafe { a.arg(args, nargs, 1) };
-    let dtype = match extract_keyword(dtype_val) {
+    let dtype = match extract_keyword(ctx, dtype_val) {
         Some(k) if matches!(k.as_str(), "f32" | "u32" | "i32" | "i64" | "raw") => k,
         _ => {
             return a.err(ctx, 

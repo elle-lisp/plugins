@@ -47,8 +47,8 @@ impl WlConn {
 
 // ── Keyword → enum helpers ────────────────────────────────────────────
 
-fn parse_layer(a: &elle_plugin::Api, v: ElleValue) -> zwlr_layer_shell_v1::Layer {
-    if let Some(name) = a.get_keyword_name(v) {
+fn parse_layer(a: &elle_plugin::Api, ctx: *mut ElleCtx, v: ElleValue) -> zwlr_layer_shell_v1::Layer {
+    if let Some(name) = a.get_keyword_name(ctx, v) {
         match name {
             "background" => zwlr_layer_shell_v1::Layer::Background,
             "bottom" => zwlr_layer_shell_v1::Layer::Bottom,
@@ -61,13 +61,13 @@ fn parse_layer(a: &elle_plugin::Api, v: ElleValue) -> zwlr_layer_shell_v1::Layer
     }
 }
 
-fn parse_anchor(a: &elle_plugin::Api, v: ElleValue) -> zwlr_layer_surface_v1::Anchor {
+fn parse_anchor(a: &elle_plugin::Api, ctx: *mut ElleCtx, v: ElleValue) -> zwlr_layer_surface_v1::Anchor {
     let mut anchor = zwlr_layer_surface_v1::Anchor::empty();
     // Accept an array of keyword anchors
     if let Some(n) = a.get_array_len(v) {
         for i in 0..n {
             let elem = a.get_array_item(v, i);
-            if let Some(name) = a.get_keyword_name(elem) {
+            if let Some(name) = a.get_keyword_name(ctx, elem) {
                 match name {
                     "top" => anchor.insert(zwlr_layer_surface_v1::Anchor::Top),
                     "bottom" => anchor.insert(zwlr_layer_surface_v1::Anchor::Bottom),
@@ -93,7 +93,7 @@ fn event_to_value(ctx: *mut ElleCtx, ev: &WlEvent) -> ElleValue {
             height,
             scale,
         } => a.build_struct(ctx, &[
-            ("type", a.keyword("output")),
+            ("type", a.keyword(ctx, "output")),
             ("id", a.int(*id as i64)),
             ("name", a.string(ctx, name)),
             ("width", a.int(*width as i64)),
@@ -101,7 +101,7 @@ fn event_to_value(ctx: *mut ElleCtx, ev: &WlEvent) -> ElleValue {
             ("scale", a.int(*scale as i64)),
         ]),
         WlEvent::Seat { id, name, caps } => a.build_struct(ctx, &[
-            ("type", a.keyword("seat")),
+            ("type", a.keyword(ctx, "seat")),
             ("id", a.int(*id as i64)),
             ("name", a.string(ctx, name)),
             ("caps", a.int(*caps as i64)),
@@ -112,45 +112,45 @@ fn event_to_value(ctx: *mut ElleCtx, ev: &WlEvent) -> ElleValue {
             width,
             height,
         } => a.build_struct(ctx, &[
-            ("type", a.keyword("configure")),
+            ("type", a.keyword(ctx, "configure")),
             ("surface-id", a.int(*surface_id as i64)),
             ("serial", a.int(*serial as i64)),
             ("width", a.int(*width as i64)),
             ("height", a.int(*height as i64)),
         ]),
         WlEvent::Closed { surface_id } => a.build_struct(ctx, &[
-            ("type", a.keyword("closed")),
+            ("type", a.keyword(ctx, "closed")),
             ("surface-id", a.int(*surface_id as i64)),
         ]),
         WlEvent::BufferRelease { buffer_id } => a.build_struct(ctx, &[
-            ("type", a.keyword("buffer-release")),
+            ("type", a.keyword(ctx, "buffer-release")),
             ("buffer-id", a.int(*buffer_id as i64)),
         ]),
         WlEvent::ScreencopyReady { frame_id } => a.build_struct(ctx, &[
-            ("type", a.keyword("screencopy-ready")),
+            ("type", a.keyword(ctx, "screencopy-ready")),
             ("frame-id", a.int(*frame_id as i64)),
         ]),
         WlEvent::ScreencopyFailed { frame_id } => a.build_struct(ctx, &[
-            ("type", a.keyword("screencopy-failed")),
+            ("type", a.keyword(ctx, "screencopy-failed")),
             ("frame-id", a.int(*frame_id as i64)),
         ]),
         WlEvent::ToplevelNew { id, title, app_id } => a.build_struct(ctx, &[
-            ("type", a.keyword("toplevel-new")),
+            ("type", a.keyword(ctx, "toplevel-new")),
             ("id", a.int(*id as i64)),
             ("title", a.string(ctx, title)),
             ("app-id", a.string(ctx, app_id)),
         ]),
         WlEvent::ToplevelDone { id, title, state } => {
-            let state_vals: Vec<ElleValue> = state.iter().map(|s| a.keyword(s)).collect();
+            let state_vals: Vec<ElleValue> = state.iter().map(|s| a.keyword(ctx, s)).collect();
             a.build_struct(ctx, &[
-                ("type", a.keyword("toplevel-done")),
+                ("type", a.keyword(ctx, "toplevel-done")),
                 ("id", a.int(*id as i64)),
                 ("title", a.string(ctx, title)),
                 ("state", a.set(ctx, &state_vals)),
             ])
         }
         WlEvent::ToplevelClosed { id } => a.build_struct(ctx, &[
-            ("type", a.keyword("toplevel-closed")),
+            ("type", a.keyword(ctx, "toplevel-closed")),
             ("id", a.int(*id as i64)),
         ]),
     }
@@ -373,12 +373,12 @@ extern "C" fn prim_layer_surface(ctx: *mut ElleCtx, args: *const ElleValue, narg
         if a.check_struct(opts) {
             let lv = a.get_struct_field(opts, "layer");
             if !a.check_nil(lv) {
-                layer = parse_layer(a, lv);
+                layer = parse_layer(a, ctx, lv);
             }
 
             let av = a.get_struct_field(opts, "anchor");
             if !a.check_nil(av) {
-                anchor = parse_anchor(a, av);
+                anchor = parse_anchor(a, ctx, av);
             }
 
             let wv = a.get_struct_field(opts, "width");

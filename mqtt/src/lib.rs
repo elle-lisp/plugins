@@ -145,7 +145,7 @@ fn packet_to_value(ctx: *mut ElleCtx, packet: &Packet) -> ElleValue {
                 v4::ConnectReturnCode::NotAuthorized => 5,
             };
             a.build_struct(ctx, &[
-                ("type", a.keyword("connack")),
+                ("type", a.keyword(ctx, "connack")),
                 ("session-present", a.boolean(p.session_present)),
                 ("code", a.int(code)),
             ])
@@ -157,7 +157,7 @@ fn packet_to_value(ctx: *mut ElleCtx, packet: &Packet) -> ElleValue {
                 a.int(p.pkid as i64)
             };
             a.build_struct(ctx, &[
-                ("type", a.keyword("publish")),
+                ("type", a.keyword(ctx, "publish")),
                 ("topic", a.string(ctx, p.topic.as_str())),
                 ("payload", a.bytes(ctx, &p.payload)),
                 ("qos", a.int(qos_to_int(p.qos))),
@@ -175,28 +175,28 @@ fn packet_to_value(ctx: *mut ElleCtx, packet: &Packet) -> ElleValue {
                 })
                 .collect();
             a.build_struct(ctx, &[
-                ("type", a.keyword("suback")),
+                ("type", a.keyword(ctx, "suback")),
                 ("packet-id", a.int(p.pkid as i64)),
                 ("codes", a.array(ctx, &codes)),
             ])
         }
         Packet::UnsubAck(p) => {
             a.build_struct(ctx, &[
-                ("type", a.keyword("unsuback")),
+                ("type", a.keyword(ctx, "unsuback")),
                 ("packet-id", a.int(p.pkid as i64)),
             ])
         }
         Packet::PubAck(p) => {
             a.build_struct(ctx, &[
-                ("type", a.keyword("puback")),
+                ("type", a.keyword(ctx, "puback")),
                 ("packet-id", a.int(p.pkid as i64)),
             ])
         }
         Packet::PingResp => {
-            a.build_struct(ctx, &[("type", a.keyword("pingresp"))])
+            a.build_struct(ctx, &[("type", a.keyword(ctx, "pingresp"))])
         }
         _ => {
-            a.build_struct(ctx, &[("type", a.keyword("unknown"))])
+            a.build_struct(ctx, &[("type", a.keyword(ctx, "unknown"))])
         }
     }
 }

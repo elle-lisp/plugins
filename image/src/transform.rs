@@ -5,9 +5,9 @@ use image::DynamicImage;
 use elle_plugin::{ElleCtx, ElleResult, ElleValue};
 use crate::{api, get_image, require_float, require_int, wrap_image};
 
-fn parse_filter(val: ElleValue) -> FilterType {
+fn parse_filter(ctx: *mut ElleCtx, val: ElleValue) -> FilterType {
     let a = api();
-    a.get_keyword_name(val).map(|s| match s {
+    a.get_keyword_name(ctx, val).map(|s| match s {
         "nearest" => FilterType::Nearest,
         "bilinear" | "triangle" => FilterType::Triangle,
         "catmull-rom" | "cubic" => FilterType::CatmullRom,
@@ -22,7 +22,7 @@ pub(crate) extern "C" fn prim_resize(ctx: *mut ElleCtx, args: *const ElleValue, 
     let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/resize") { Ok(i) => i, Err(e) => return e };
     let w = match require_int(ctx, unsafe { a.arg(args, nargs, 1) }, "image/resize", "width") { Ok(v) => v as u32, Err(e) => return e };
     let h = match require_int(ctx, unsafe { a.arg(args, nargs, 2) }, "image/resize", "height") { Ok(v) => v as u32, Err(e) => return e };
-    let filter = if nargs > 3 { parse_filter(unsafe { a.arg(args, nargs, 3) }) } else { FilterType::Lanczos3 };
+    let filter = if nargs > 3 { parse_filter(ctx, unsafe { a.arg(args, nargs, 3) }) } else { FilterType::Lanczos3 };
     a.ok(wrap_image(ctx, img.resize_exact(w, h, filter)))
 }
 
@@ -40,7 +40,7 @@ pub(crate) extern "C" fn prim_rotate(ctx: *mut ElleCtx, args: *const ElleValue, 
     let a = api();
     let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/rotate") { Ok(i) => i, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let angle = match a.get_keyword_name(v1) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/rotate: angle must be :r90 :r180 :r270, got {}", a.type_name(v1))) };
+    let angle = match a.get_keyword_name(ctx, v1) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/rotate: angle must be :r90 :r180 :r270, got {}", a.type_name(v1))) };
     let result = match angle {
         "r90" | "90" => img.rotate90(), "r180" | "180" => img.rotate180(), "r270" | "270" => img.rotate270(),
         _ => return a.err(ctx, "value-error", &format!("image/rotate: expected :r90 :r180 :r270, got :{}", angle)),
@@ -52,7 +52,7 @@ pub(crate) extern "C" fn prim_flip(ctx: *mut ElleCtx, args: *const ElleValue, na
     let a = api();
     let img = match get_image(ctx, unsafe { a.arg(args, nargs, 0) }, "image/flip") { Ok(i) => i, Err(e) => return e };
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let dir = match a.get_keyword_name(v1) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/flip: direction must be :h or :v, got {}", a.type_name(v1))) };
+    let dir = match a.get_keyword_name(ctx, v1) { Some(s) => s, None => return a.err(ctx, "type-error", &format!("image/flip: direction must be :h or :v, got {}", a.type_name(v1))) };
     let result = match dir {
         "h" | "horizontal" => img.fliph(), "v" | "vertical" => img.flipv(),
         _ => return a.err(ctx, "value-error", &format!("image/flip: expected :h or :v, got :{}", dir)),

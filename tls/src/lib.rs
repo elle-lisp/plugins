@@ -293,7 +293,7 @@ extern "C" fn prim_tls_process(ctx: *mut ElleCtx, args: *const ElleValue, nargs:
         None => return a.err(ctx, "type-error", &format!("{}: expected bytes, got {}", name, a.type_name(v1))),
     };
     match drive_state_machine(ctx, state, &new_data) {
-        Ok(kw) => a.ok(a.keyword(kw)),
+        Ok(kw) => a.ok(a.keyword(ctx, kw)),
         Err(e) => e,
     }
 }
@@ -385,7 +385,7 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
 
     if !state.handshake_complete.get() {
         return a.ok(a.build_struct(ctx, &[
-            ("status", a.keyword("error")),
+            ("status", a.keyword(ctx, "error")),
             ("message", a.string(ctx, &format!("{}: handshake not complete", name))),
         ]));
     }
@@ -455,7 +455,7 @@ extern "C" fn prim_tls_write_plaintext(ctx: *mut ElleCtx, args: *const ElleValue
     }
 
     let ciphertext: Vec<u8> = std::mem::take(&mut *outgoing);
-    a.ok(a.build_struct(ctx, &[("status", a.keyword("ok")), ("outgoing", a.bytes(ctx, &ciphertext))]))
+    a.ok(a.build_struct(ctx, &[("status", a.keyword(ctx, "ok")), ("outgoing", a.bytes(ctx, &ciphertext))]))
 }
 
 extern "C" fn prim_tls_server_config(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {

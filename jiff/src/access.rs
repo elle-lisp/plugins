@@ -46,7 +46,7 @@ pub extern "C" fn prim_date_weekday(ctx: *mut ElleCtx, args: *const ElleValue, n
         jiff::civil::Weekday::Saturday => "saturday",
         jiff::civil::Weekday::Sunday => "sunday",
     };
-    a.ok(a.keyword(name))
+    a.ok(a.keyword(ctx, name))
 }
 
 pub extern "C" fn prim_date_weekday_number(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
