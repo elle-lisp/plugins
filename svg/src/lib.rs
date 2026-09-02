@@ -10,7 +10,7 @@ elle_plugin::define_plugin!("svg/", &PRIMITIVES);
 // -- Helpers ----------------------------------------------------------------
 
 /// Emit an element struct tree to an SVG XML string.
-fn emit_element(a: &elle_plugin::Api, val: ElleValue, out: &mut String) {
+fn emit_element(ctx: *mut ElleCtx, a: &elle_plugin::Api, val: ElleValue, out: &mut String) {
     if let Some(s) = a.get_string(val) {
         xml_escape(s, out);
         return;
@@ -19,7 +19,7 @@ fn emit_element(a: &elle_plugin::Api, val: ElleValue, out: &mut String) {
         return;
     }
     let tag_val = a.get_struct_field(val, "tag");
-    let tag = match a.get_keyword_name(tag_val) {
+    let tag = match a.get_keyword_name(ctx, tag_val) {
         Some(name) => name.to_string(),
         None => return,
     };
@@ -35,7 +35,7 @@ fn emit_element(a: &elle_plugin::Api, val: ElleValue, out: &mut String) {
         Some(len) => {
             out.push('>');
             for i in 0..len {
-                emit_element(a, a.get_array_item(children_val, i), out);
+                emit_element(ctx, a, a.get_array_item(children_val, i), out);
             }
             out.push_str("</");
             out.push_str(&tag);
@@ -63,7 +63,7 @@ fn get_svg_string(ctx: *mut ElleCtx, val: ElleValue, name: &str) -> Result<Strin
     } else if a.check_struct(val) {
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        emit_element(a, val, &mut out);
+        emit_element(ctx, a, val, &mut out);
         Ok(out)
     } else {
         Err(a.err(ctx, 

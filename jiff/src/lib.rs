@@ -112,7 +112,7 @@ pub fn require_float(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<f
 
 pub fn require_keyword(ctx: *mut ElleCtx, v: ElleValue, fn_name: &str) -> Result<String, ElleResult> {
     let a = api();
-    a.get_keyword_name(v)
+    a.get_keyword_name(ctx, v)
         .map(|s| s.to_string())
         .ok_or_else(|| a.err(ctx, "type-error", &format!("{}: expected keyword, got {}", fn_name, a.type_name(v))))
 }

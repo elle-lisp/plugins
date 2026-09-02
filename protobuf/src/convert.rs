@@ -66,7 +66,7 @@ fn elle_to_pb(ctx: *mut ElleCtx, val: ElleValue, field: &FieldDescriptor) -> Res
             if let Some(n) = a.get_int(val) {
                 return Ok(PbValue::EnumNumber(n as i32));
             }
-            if let Some(kw) = a.get_keyword_name(val) {
+            if let Some(kw) = a.get_keyword_name(ctx, val) {
                 match enum_desc.get_value_by_name(kw) {
                     Some(v) => return Ok(PbValue::EnumNumber(v.number())),
                     None => {
@@ -212,7 +212,7 @@ fn encode_map(
         .get_field_by_name("value")
         .ok_or_else(|| format!("field '{}': map entry has no 'value' field", field.name()))?;
 
-    let entries = a.struct_entries(val);
+    let entries = a.struct_entries(ctx, val);
     let mut result = HashMap::with_capacity(entries.len());
 
     for (key_str, entry_val) in entries {
@@ -322,7 +322,7 @@ fn pb_to_elle(ctx: *mut ElleCtx, val: &PbValue, field: &FieldDescriptor) -> Resu
                 }
             };
             match enum_desc.get_value(*n) {
-                Some(v) => Ok(a.keyword(v.name())),
+                Some(v) => Ok(a.keyword(ctx, v.name())),
                 None => Ok(a.int(*n as i64)),
             }
         }

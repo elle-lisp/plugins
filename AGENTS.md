@@ -35,7 +35,14 @@ existing plugins.
 
 Every primitive takes an opaque per-call `ctx` as its first argument and
 passes it, unchanged, into any allocating constructor so the result lands
-in the call's region on the call's heap.
+in the call's region on the call's heap. A method that reads or writes a
+*name* takes `ctx` for a second reason: a symbol or keyword is a bare hash,
+and the spelling behind it lives in the calling instance's memo, which `ctx`
+is the way to reach. That covers `keyword`, `get_keyword_name`,
+`get_struct_key`, `struct_entries`, and `kw_name`.
+
+A helper that calls any of these therefore takes `ctx` too — by convention as
+its first parameter, matching the primitives.
 
 ```rust
 use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK};

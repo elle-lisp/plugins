@@ -70,7 +70,7 @@ fn value_to_toml(ctx: *mut ElleCtx, v: ElleValue, name: &str) -> Result<toml::Va
     }
     // Struct — keyword keys become TOML table keys
     if a.check_struct(v) {
-        let entries = a.struct_entries(v);
+        let entries = a.struct_entries(ctx, v);
         let mut table = toml::map::Map::new();
         for (key, val) in entries {
             table.insert(key.to_string(), value_to_toml(ctx, val, name)?);

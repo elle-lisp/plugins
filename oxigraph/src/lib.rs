@@ -185,13 +185,13 @@ elle_plugin::define_plugin!("oxigraph/", &PRIMITIVES);
 /// Build an Elle array representing an RDF IRI: `[:iri "http://..."]`.
 fn iri_to_elle(ctx: *mut ElleCtx, n: &NamedNode) -> ElleValue {
     let a = api();
-    a.array(ctx, &[a.keyword("iri"), a.string(ctx, n.as_str())])
+    a.array(ctx, &[a.keyword(ctx, "iri"), a.string(ctx, n.as_str())])
 }
 
 /// Build an Elle array representing an RDF blank node: `[:bnode "id"]`.
 fn bnode_to_elle(ctx: *mut ElleCtx, b: &BlankNode) -> ElleValue {
     let a = api();
-    a.array(ctx, &[a.keyword("bnode"), a.string(ctx, b.as_str())])
+    a.array(ctx, &[a.keyword(ctx, "bnode"), a.string(ctx, b.as_str())])
 }
 
 /// Build an Elle array representing an RDF literal.
@@ -199,21 +199,21 @@ fn literal_to_elle(ctx: *mut ElleCtx, l: &Literal) -> ElleValue {
     let a = api();
     if let Some(lang) = l.language() {
         a.array(ctx, &[
-            a.keyword("literal"),
+            a.keyword(ctx, "literal"),
             a.string(ctx, l.value()),
-            a.keyword("lang"),
+            a.keyword(ctx, "lang"),
             a.string(ctx, lang),
         ])
     } else {
         let dt = l.datatype().as_str();
         const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
         if dt == XSD_STRING {
-            a.array(ctx, &[a.keyword("literal"), a.string(ctx, l.value())])
+            a.array(ctx, &[a.keyword(ctx, "literal"), a.string(ctx, l.value())])
         } else {
             a.array(ctx, &[
-                a.keyword("literal"),
+                a.keyword(ctx, "literal"),
                 a.string(ctx, l.value()),
-                a.keyword("datatype"),
+                a.keyword(ctx, "datatype"),
                 a.string(ctx, dt),
             ])
         }
@@ -237,7 +237,7 @@ fn elle_to_term(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<Term, E
     })?;
 
     let first = a.get_array_item(val, 0);
-    let tag = a.get_keyword_name(first).ok_or_else(|| {
+    let tag = a.get_keyword_name(ctx, first).ok_or_else(|| {
         a.err(ctx, "type-error", &format!("{}: term array must start with a keyword tag", prim))
     })?;
 
@@ -260,7 +260,7 @@ fn elle_to_term(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<Term, E
                 Ok(Term::from(Literal::new_simple_literal(&value)))
             } else if len == 4 {
                 let key_val = a.get_array_item(val, 2);
-                let key = a.get_keyword_name(key_val).ok_or_else(|| {
+                let key = a.get_keyword_name(ctx, key_val).ok_or_else(|| {
                     a.err(ctx, "type-error", &format!("{}: expected :lang or :datatype keyword at index 2", prim))
                 })?;
                 let tag_val = string_at(ctx, val, 3, len, prim, "tag value")?;
@@ -401,11 +401,11 @@ extern "C" fn prim_literal(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usi
     };
 
     if nargs == 1 {
-        return a.ok(a.array(ctx, &[a.keyword("literal"), a.string(ctx, &value)]));
+        return a.ok(a.array(ctx, &[a.keyword(ctx, "literal"), a.string(ctx, &value)]));
     }
 
     let v1 = unsafe { a.arg(args, nargs, 1) };
-    let tag_key = match a.get_keyword_name(v1) {
+    let tag_key = match a.get_keyword_name(ctx, v1) {
         Some(k) => k.to_string(),
         None => return a.err(ctx, "type-error", &format!("oxigraph/literal: expected :lang or :datatype keyword, got {}", a.type_name(v1))),
     };
@@ -419,9 +419,9 @@ extern "C" fn prim_literal(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usi
         "lang" => {
             match Literal::new_language_tagged_literal(&value, &tag_val) {
                 Ok(_) => a.ok(a.array(ctx, &[
-                    a.keyword("literal"),
+                    a.keyword(ctx, "literal"),
                     a.string(ctx, &value),
-                    a.keyword("lang"),
+                    a.keyword(ctx, "lang"),
                     a.string(ctx, &tag_val),
                 ])),
                 Err(e) => oxigraph_err(ctx, "oxigraph/literal", e),
@@ -429,9 +429,9 @@ extern "C" fn prim_literal(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usi
         }
         "datatype" => {
             a.ok(a.array(ctx, &[
-                a.keyword("literal"),
+                a.keyword(ctx, "literal"),
                 a.string(ctx, &value),
-                a.keyword("datatype"),
+                a.keyword(ctx, "datatype"),
                 a.string(ctx, &tag_val),
             ]))
         }
@@ -663,7 +663,7 @@ extern "C" fn prim_update(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usiz
 /// Map a keyword value to an `RdfFormat`, or return an error.
 fn keyword_to_format(ctx: *mut ElleCtx, val: ElleValue, prim: &str) -> Result<RdfFormat, ElleResult> {
     let a = api();
-    let kw = a.get_keyword_name(val).ok_or_else(|| {
+    let kw = a.get_keyword_name(ctx, val).ok_or_else(|| {
         a.err(ctx, "type-error", &format!("{}: expected format keyword (:turtle :ntriples :nquads :rdfxml), got {}", prim, a.type_name(val)))
     })?;
     match kw {

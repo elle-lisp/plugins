@@ -158,14 +158,15 @@ fn parse_xml(ctx: *mut ElleCtx, input: &str) -> Result<ElleValue, String> {
 
 const MAX_EMIT_DEPTH: usize = 256;
 
-fn emit_xml(val: ElleValue) -> Result<String, String> {
+fn emit_xml(ctx: *mut ElleCtx, val: ElleValue) -> Result<String, String> {
     let mut output = Vec::new();
     let mut writer = Writer::new(&mut output);
-    emit_element(&mut writer, val, 0)?;
+    emit_element(ctx, &mut writer, val, 0)?;
     String::from_utf8(output).map_err(|e| format!("xml/emit: UTF-8 error: {}", e))
 }
 
 fn emit_element(
+    ctx: *mut ElleCtx,
     writer: &mut Writer<&mut Vec<u8>>,
     val: ElleValue,
     depth: usize,
@@ -227,7 +228,7 @@ fn emit_element(
 
     // Emit attributes by iterating struct entries
     if a.check_struct(attrs_val) {
-        for (key, field_val) in a.struct_entries(attrs_val) {
+        for (key, field_val) in a.struct_entries(ctx, attrs_val) {
             let val_str = match a.get_string(field_val) {
                 Some(s) => s.to_string(),
                 None => {
@@ -251,7 +252,7 @@ fn emit_element(
             .write_event(Event::Start(start))
             .map_err(|e| format!("xml/emit: write error: {}", e))?;
         for i in 0..children_len {
-            emit_element(writer, a.get_array_item(children_val, i), depth + 1)?;
+            emit_element(ctx, writer, a.get_array_item(children_val, i), depth + 1)?;
         }
         writer
             .write_event(Event::End(BytesEnd::new(tag.as_str())))
@@ -415,25 +416,25 @@ extern "C" fn prim_xml_next_event(ctx: *mut ElleCtx, args: *const ElleValue, nar
                     attrs.iter().map(|(k, v)| (k.as_str(), *v)).collect();
                 let attrs_val = a.build_struct(ctx, &attrs_kvs);
                 return a.ok(a.build_struct(ctx, &[
-                    ("type", a.keyword("start")),
+                    ("type", a.keyword(ctx, "start")),
                     ("tag", a.string(ctx, &tag)),
                     ("attrs", attrs_val),
                 ]));
             }
             OwnedEvent::End { tag } => {
                 return a.ok(a.build_struct(ctx, &[
-                    ("type", a.keyword("end")),
+                    ("type", a.keyword(ctx, "end")),
                     ("tag", a.string(ctx, &tag)),
                 ]));
             }
             OwnedEvent::Text(text) => {
                 return a.ok(a.build_struct(ctx, &[
-                    ("type", a.keyword("text")),
+                    ("type", a.keyword(ctx, "text")),
                     ("content", a.string(ctx, &text)),
                 ]));
             }
             OwnedEvent::Eof => {
-                return a.ok(a.build_struct(ctx, &[("type", a.keyword("eof"))]));
+                return a.ok(a.build_struct(ctx, &[("type", a.keyword(ctx, "eof"))]));
             }
             OwnedEvent::Skip => continue,
         }
@@ -489,7 +490,7 @@ extern "C" fn prim_xml_emit(ctx: *mut ElleCtx, args: *const ElleValue, nargs: us
             ),
         );
     }
-    match emit_xml(arg0) {
+    match emit_xml(ctx, arg0) {
         Ok(s) => a.ok(a.string(ctx, &s)),
         Err(e) => a.err(ctx, "xml-error", &e),
     }

@@ -93,7 +93,7 @@ extern "C" fn prim_syn_item_kind(ctx: *mut ElleCtx, args: *const ElleValue, narg
         Some(i) => i,
         None => return a.err(ctx, "type-error", &format!("syn/item-kind: expected syn-item, got {}", a.type_name(v))),
     };
-    a.ok(a.keyword(item_kind_str(item)))
+    a.ok(a.keyword(ctx, item_kind_str(item)))
 }
 
 extern "C" fn prim_syn_item_name(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
@@ -184,16 +184,16 @@ fn fields_to_elle(ctx: *mut ElleCtx, fields: &syn::Fields) -> (ElleValue, ElleVa
                 let type_str = f.ty.to_token_stream().to_string();
                 a.build_struct(ctx, &[("name", name_val), ("type", a.string(ctx, &type_str))])
             }).collect();
-            (a.keyword("named"), list(ctx, fs))
+            (a.keyword(ctx, "named"), list(ctx, fs))
         }
         syn::Fields::Unnamed(unnamed) => {
             let fs: Vec<ElleValue> = unnamed.unnamed.iter().map(|f| {
                 let type_str = f.ty.to_token_stream().to_string();
                 a.build_struct(ctx, &[("name", a.nil()), ("type", a.string(ctx, &type_str))])
             }).collect();
-            (a.keyword("tuple"), list(ctx, fs))
+            (a.keyword(ctx, "tuple"), list(ctx, fs))
         }
-        syn::Fields::Unit => (a.keyword("unit"), list(ctx, vec![])),
+        syn::Fields::Unit => (a.keyword(ctx, "unit"), list(ctx, vec![])),
     }
 }
 
@@ -367,7 +367,7 @@ extern "C" fn prim_syn_visibility(ctx: *mut ElleCtx, args: *const ElleValue, nar
         }
         Some(syn::Visibility::Inherited) => "private",
     };
-    a.ok(a.keyword(kw))
+    a.ok(a.keyword(ctx, kw))
 }
 
 // ---------------------------------------------------------------------------

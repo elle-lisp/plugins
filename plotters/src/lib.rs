@@ -94,7 +94,7 @@ fn parse_hex_color(s: &str) -> Option<RGBColor> {
     Some(RGBColor(r, g, b))
 }
 
-fn parse_color(a: &elle_plugin::Api, val: ElleValue) -> Option<RGBColor> {
+fn parse_color(ctx: *mut ElleCtx, a: &elle_plugin::Api, val: ElleValue) -> Option<RGBColor> {
     // Try hex string like "#ff0000"
     if let Some(s) = a.get_string(val) {
         return parse_hex_color(s);
@@ -109,7 +109,7 @@ fn parse_color(a: &elle_plugin::Api, val: ElleValue) -> Option<RGBColor> {
         }
     }
     // Try keyword like :red
-    match a.get_keyword_name(val)? {
+    match a.get_keyword_name(ctx, val)? {
         "red" => Some(RGBColor(214, 39, 40)),
         "blue" => Some(RGBColor(31, 119, 180)),
         "green" => Some(RGBColor(44, 160, 44)),
@@ -136,7 +136,7 @@ fn parse_range(a: &elle_plugin::Api, val: ElleValue) -> Option<(f64, f64)> {
     ))
 }
 
-fn parse_opts(a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
+fn parse_opts(ctx: *mut ElleCtx, a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
     let mut o = ChartOpts::default();
     if !a.check_struct(val) {
         return o;
@@ -159,7 +159,7 @@ fn parse_opts(a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
     if let Some(n) = a.get_int(a.get_struct_field(val, "bins")) {
         o.bins = n.max(1) as usize;
     }
-    if a.get_keyword_name(a.get_struct_field(val, "format")) == Some("svg") {
+    if a.get_keyword_name(ctx, a.get_struct_field(val, "format")) == Some("svg") {
         o.svg = true;
     }
     if let Some(r) = parse_range(a, a.get_struct_field(val, "x-range")) {
@@ -175,13 +175,13 @@ fn parse_opts(a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
     } else if a.get_int(legend_val) == Some(0) {
         o.legend = false;
     }
-    if let Some(c) = parse_color(a, a.get_struct_field(val, "color")) {
+    if let Some(c) = parse_color(ctx, a, a.get_struct_field(val, "color")) {
         o.colors = vec![c];
     }
     let cv = a.get_struct_field(val, "colors");
     if let Some(len) = a.get_array_len(cv) {
         let cs: Vec<_> =
-            (0..len).filter_map(|i| parse_color(a, a.get_array_item(cv, i))).collect();
+            (0..len).filter_map(|i| parse_color(ctx, a, a.get_array_item(cv, i))).collect();
         if !cs.is_empty() {
             o.colors = cs;
         }
@@ -644,7 +644,7 @@ extern "C" fn prim_line(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize)
         Err(e) => return e,
     };
     let opts =
-        if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
+        if nargs > 1 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series = vec![SeriesSpec { kind: SeriesKind::Line, label: None, data: pts, color: None, size: None }];
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
@@ -659,7 +659,7 @@ extern "C" fn prim_scatter(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usi
         Err(e) => return e,
     };
     let opts =
-        if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
+        if nargs > 1 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series =
         vec![SeriesSpec { kind: SeriesKind::Scatter, label: None, data: pts, color: None, size: None }];
     match render_xy_chart(ctx, &series, &opts) {
@@ -675,7 +675,7 @@ extern "C" fn prim_area(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize)
         Err(e) => return e,
     };
     let opts =
-        if nargs > 1 { parse_opts(a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
+        if nargs > 1 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
     let series = vec![SeriesSpec { kind: SeriesKind::Area, label: None, data: pts, color: None, size: None }];
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
@@ -704,7 +704,7 @@ extern "C" fn prim_bar(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) 
         );
     }
     let opts =
-        if nargs > 2 { parse_opts(a, unsafe { a.arg(args, nargs, 2) }) } else { ChartOpts::default() };
+        if nargs > 2 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 2) }) } else { ChartOpts::default() };
     match render_bar_chart(ctx, &labels, &values, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err(ctx, "plotters-error", &format!("plotters/bar: {}", e)),
@@ -718,7 +718,7 @@ extern "C" fn prim_histogram(ctx: *mut ElleCtx, args: *const ElleValue, nargs: u
         Err(e) => return e,
     };
     let opts = if nargs > 1 {
-        parse_opts(a, unsafe { a.arg(args, nargs, 1) })
+        parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) })
     } else {
         ChartOpts::default()
     };
@@ -737,7 +737,7 @@ extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
             &format!("plotters/chart: expected struct, got {}", a.type_name(spec)),
         );
     }
-    let opts = parse_opts(a, spec);
+    let opts = parse_opts(ctx, a, spec);
     let sv = a.get_struct_field(spec, "series");
     let slen = match a.get_array_len(sv) {
         Some(n) => n,
@@ -752,7 +752,7 @@ extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
                 &format!("plotters/chart: series[{}] must be a struct", i),
             );
         }
-        let kind = match a.get_keyword_name(a.get_struct_field(s, "type")) {
+        let kind = match a.get_keyword_name(ctx, a.get_struct_field(s, "type")) {
             Some("line") => SeriesKind::Line,
             Some("scatter") => SeriesKind::Scatter,
             Some("area") => SeriesKind::Area,
@@ -777,7 +777,7 @@ extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
             Ok(d) => d,
             Err(e) => return e,
         };
-        let color = parse_color(a, a.get_struct_field(s, "color"));
+        let color = parse_color(ctx, a, a.get_struct_field(s, "color"));
         let size = a.get_int(a.get_struct_field(s, "size")).map(|v| v.max(1) as u32);
         series.push(SeriesSpec { kind, label, data, color, size });
     }

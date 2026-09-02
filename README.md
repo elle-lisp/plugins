@@ -4,7 +4,11 @@ Dynamically-loaded Rust libraries that extend [Elle](https://github.com/elle-lis
 with additional primitives.
 
 Plugins use the **stable `elle-plugin` ABI** — they can be compiled
-independently from elle and loaded at runtime without version matching.
+independently from elle and loaded at runtime. Stable does not mean
+unversioned: a plugin resolves API functions by name, and a name carries no
+argument list, so `elle-plugin` advertises an `ABI_VERSION` and a plugin
+refuses to load into a host that speaks a different one. Rebuild the plugins
+whenever that version moves.
 
 ## Building
 

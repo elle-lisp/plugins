@@ -237,7 +237,7 @@ extern "C" fn prim_batch(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
         let col_data_val = a.get_array_item(pair, 1);
         let col_name = match a
             .get_string(col_name_val)
-            .or_else(|| a.get_keyword_name(col_name_val))
+            .or_else(|| a.get_keyword_name(ctx, col_name_val))
         {
             Some(s) => s.to_string(),
             None => {

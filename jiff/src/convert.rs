@@ -93,7 +93,7 @@ pub extern "C" fn prim_temporal_round(ctx: *mut ElleCtx, args: *const ElleValue,
         Some(v) => v,
         None => return a.err(ctx, "jiff-error", "temporal/round: opts must contain :unit keyword"),
     };
-    let unit_name = match a.get_keyword_name(unit_val) {
+    let unit_name = match a.get_keyword_name(ctx, unit_val) {
         Some(k) => k.to_string(),
         None => return a.err(ctx, "type-error", "temporal/round: :unit must be a keyword"),
     };
