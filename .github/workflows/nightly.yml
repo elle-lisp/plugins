@@ -71,10 +71,10 @@ jobs:
           ln -s /tmp/elle/elle-plugin ../elle-plugin
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install GNU parallel and libclang
+      - name: Install GNU parallel, libclang and fontconfig
         run: |
           sudo apt-get update
-          sudo apt-get install -y parallel libclang-dev llvm-dev clang
+          sudo apt-get install -y parallel libclang-dev llvm-dev clang libfontconfig1-dev
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
       - name: Build all plugins
         run: cargo build --release
