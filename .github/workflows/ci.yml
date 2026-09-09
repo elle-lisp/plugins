@@ -32,6 +32,7 @@ jobs:
           - mqtt
           - msgpack
           - oxigraph
+          - plotters
           - polars
           - protobuf
           - random
