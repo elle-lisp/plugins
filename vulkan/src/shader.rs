@@ -39,8 +39,10 @@ pub(crate) fn create_shader(
 
     // Reinterpret bytes as u32 words
     let code: Vec<u32> = spirv
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
 
     let state = ctx.lock().map_err(|e| format!("lock failed: {e}"))?;

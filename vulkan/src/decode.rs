@@ -42,32 +42,28 @@ pub(crate) fn decode(ctx: *mut ElleCtx, bytes: &[u8], dtype: &str) -> Result<Ell
         let chunk = &bytes[offset..offset + data_bytes];
         let elements: Vec<ElleValue> = match dtype {
             "f32" => chunk
-                .chunks_exact(4)
-                .map(|c| {
-                    let f = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-                    a.float(f as f64)
-                })
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| a.float(f32::from_le_bytes(*c) as f64))
                 .collect(),
             "u32" => chunk
-                .chunks_exact(4)
-                .map(|c| {
-                    let n = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-                    a.int(n as i64)
-                })
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| a.int(u32::from_le_bytes(*c) as i64))
                 .collect(),
             "i32" => chunk
-                .chunks_exact(4)
-                .map(|c| {
-                    let n = i32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-                    a.int(n as i64)
-                })
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| a.int(i32::from_le_bytes(*c) as i64))
                 .collect(),
             "i64" => chunk
-                .chunks_exact(8)
-                .map(|c| {
-                    let n = i64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]);
-                    a.int(n)
-                })
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| a.int(i64::from_le_bytes(*c)))
                 .collect(),
             "raw" => {
                 arrays.push(a.bytes(ctx, chunk));
