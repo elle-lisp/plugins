@@ -1,11 +1,12 @@
-//! Elle crypto plugin — SHA-2 family hashes and HMAC.
+//! Elle crypto plugin — SHA-2 family hashes, HMAC, and Ed25519 signatures.
 //!
 //! Uses the stable elle-plugin ABI. Can be compiled independently from elle.
 
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 
-use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_OK};
+use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
 
 elle_plugin::define_plugin!("crypto/", &PRIMITIVES);
 
@@ -107,9 +108,106 @@ hmac_primitive!(prim_hmac_sha512, Sha512, "crypto/hmac-sha512");
 hmac_primitive!(prim_hmac_sha512_224, Sha512_224, "crypto/hmac-sha512-224");
 hmac_primitive!(prim_hmac_sha512_256, Sha512_256, "crypto/hmac-sha512-256");
 
+// ── Ed25519 ───────────────────────────────────────────────────────────
+
+/// Coerce an argument to exactly `n` bytes, as a seed, a public key or a
+/// signature requires. A wrong length is a range-error, so a truncated key
+/// never silently derives a different identity.
+fn fixed_bytes<const N: usize>(
+    ctx: *mut ElleCtx,
+    val: ElleValue,
+    name: &str,
+    pos: &str,
+) -> Result<[u8; N], ElleResult> {
+    let a = api();
+    let data = extract_byte_data(ctx, val, name, pos)?;
+    <[u8; N]>::try_from(data.as_slice()).map_err(|_| {
+        a.err(ctx, "range-error", &format!(
+            "{}: {} must be exactly {} bytes, got {}", name, pos, N, data.len(),
+        ))
+    })
+}
+
+extern "C" fn prim_ed25519_public(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let seed = match fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 0) }, "crypto/ed25519-public", "seed") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let key = SigningKey::from_bytes(&seed);
+    a.ok(a.bytes(ctx, &key.verifying_key().to_bytes()))
+}
+
+extern "C" fn prim_ed25519_sign(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let seed = match fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 0) }, "crypto/ed25519-sign", "seed") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let message = match extract_byte_data(ctx, unsafe { a.arg(args, nargs, 1) }, "crypto/ed25519-sign", "message") {
+        Ok(m) => m,
+        Err(e) => return e,
+    };
+    let key = SigningKey::from_bytes(&seed);
+    a.ok(a.bytes(ctx, &key.sign(&message).to_bytes()))
+}
+
+extern "C" fn prim_ed25519_verify(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let pk = match fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 0) }, "crypto/ed25519-verify", "public key") {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let message = match extract_byte_data(ctx, unsafe { a.arg(args, nargs, 1) }, "crypto/ed25519-verify", "message") {
+        Ok(m) => m,
+        Err(e) => return e,
+    };
+    let sig = match fixed_bytes::<64>(ctx, unsafe { a.arg(args, nargs, 2) }, "crypto/ed25519-verify", "signature") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    // A public key that is not a point on the curve verifies nothing, and a
+    // signature that does not check out is the false this answers, not a raise.
+    let ok = match VerifyingKey::from_bytes(&pk) {
+        Ok(key) => key.verify(&message, &Signature::from_bytes(&sig)).is_ok(),
+        Err(_) => false,
+    };
+    a.ok(a.boolean(ok))
+}
+
 // ── Registration table ────────────────────────────────────────────────
 
 static PRIMITIVES: &[EllePrimDef] = &[
+    EllePrimDef::exact(
+        "crypto/ed25519-public", prim_ed25519_public, SIG_ERROR, 1,
+        "The Ed25519 public key of a 32-byte seed. Returns 32 bytes.",
+        "crypto",
+        "(bytes->hex (crypto/ed25519-public seed))",
+    ),
+    EllePrimDef::exact(
+        "crypto/ed25519-sign", prim_ed25519_sign, SIG_ERROR, 2,
+        "Sign a message under a 32-byte Ed25519 seed. Takes (seed, message). Returns 64 bytes.",
+        "crypto",
+        "(bytes->hex (crypto/ed25519-sign seed \"message\"))",
+    ),
+    EllePrimDef::exact(
+        "crypto/ed25519-verify", prim_ed25519_verify, SIG_ERROR, 3,
+        "Verify an Ed25519 signature. Takes (public-key, message, signature). Returns a boolean.",
+        "crypto",
+        "(crypto/ed25519-verify pk \"message\" sig)",
+    ),
     EllePrimDef::exact(
         "crypto/sha224", prim_sha224, SIG_OK, 1,
         "SHA-224 hash. Accepts string or bytes. Returns 28 bytes.",

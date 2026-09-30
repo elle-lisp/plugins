@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 elle-plugin = { path = "../../elle-plugin" }
 sha2 = "0.10"
 hmac = "0.12"
+ed25519-dalek = "2"
