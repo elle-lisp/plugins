@@ -1,6 +1,8 @@
 # elle-crypto
 
-A crypto plugin for Elle, providing SHA-2 family hashes and HMAC variants via the Rust `sha2` and `hmac` crates.
+<!-- audited: 2026-09-30 -->
+
+A crypto plugin for Elle: SHA-2 hashes and HMAC via the Rust `sha2` and `hmac` crates, and Ed25519 signatures via `ed25519-dalek`.
 
 ## Building
 
@@ -22,6 +24,12 @@ Produces `target/debug/libelle_crypto.so` (or `target/release/libelle_crypto.so`
 
 (bytes->hex (crypto/hmac-sha256 "key" "message"))
 ;; => "6e9ef29b75fffc5b7abae527d58fdadb2fe42e7219011976917343065f58ed4a"
+
+(def seed (random/csprng-bytes 32))
+(def pk (crypto/ed25519-public seed))
+(def sig (crypto/ed25519-sign seed "message"))
+(crypto/ed25519-verify pk "message" sig)
+;; => true
 ```
 
 ## Primitives
@@ -51,3 +59,18 @@ All take (key, message) where each is string, bytes, or blob.
 | `crypto/hmac-sha512` | 64 bytes | HMAC-SHA512 |
 | `crypto/hmac-sha512-224` | 28 bytes | HMAC-SHA512/224 |
 | `crypto/hmac-sha512-256` | 32 bytes | HMAC-SHA512/256 |
+
+### Ed25519 signatures
+
+A seed is the 32-byte private key of RFC 8032. A seed or a public key
+must be exactly 32 bytes, and a signature exactly 64 bytes; any other
+length is a `:range-error`. A message is a string or bytes of any length.
+
+| Name | Arguments | Output | Description |
+|------|-----------|--------|-------------|
+| `crypto/ed25519-public` | seed | 32 bytes | the public key of a seed |
+| `crypto/ed25519-sign` | seed, message | 64 bytes | the signature of message under the seed |
+| `crypto/ed25519-verify` | public-key, message, signature | boolean | true when the signature is valid for message under the public key |
+
+`crypto/ed25519-verify` answers `false` for a signature that does not
+verify, and raises only for an argument of the wrong length or type.
