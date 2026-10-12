@@ -71,7 +71,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | Plugin | Purpose |
 |--------|---------|
 | `arrow/` | Apache Arrow columnar data and Parquet |
-| `crypto/` | SHA-2 hashing, HMAC and Ed25519 signatures |
+| `crypto/` | SHA-2 hashing, HMAC, HKDF, Ed25519 signatures, X25519 key agreement and XChaCha20-Poly1305 encryption |
 | `csv/` | CSV parsing and serialization |
 | `egui/` | Immediate-mode GUI via egui |
 | `hash/` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
@@ -117,7 +117,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | Directory | Purpose |
 |-----------|---------|
 | `arrow/` | Apache Arrow columnar data |
-| `crypto/` | SHA-2 hashing, HMAC and Ed25519 signatures |
+| `crypto/` | SHA-2 hashing, HMAC, HKDF, Ed25519 signatures, X25519 key agreement and XChaCha20-Poly1305 encryption |
 | `csv/` | CSV parsing |
 | `egui/` | Immediate-mode GUI |
 | `hash/` | Universal hashing |
