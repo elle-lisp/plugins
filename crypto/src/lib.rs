@@ -1,10 +1,14 @@
-//! Elle crypto plugin — SHA-2 family hashes, HMAC, and Ed25519 signatures.
+//! Elle crypto plugin — SHA-2 hashes, HMAC, HKDF, Ed25519 signatures, X25519 key agreement and XChaCha20-Poly1305 encryption.
 //!
 //! Uses the stable elle-plugin ABI. Can be compiled independently from elle.
 
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::XChaCha20Poly1305;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
+use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
 use elle_plugin::{ElleCtx, ElleResult, ElleValue, EllePrimDef, SIG_ERROR, SIG_OK};
 
@@ -187,9 +191,181 @@ extern "C" fn prim_ed25519_verify(
     a.ok(a.boolean(ok))
 }
 
+// ── HKDF ──────────────────────────────────────────────────────────────
+
+/// The most output HKDF-SHA256 can expand to: 255 blocks of 32 bytes.
+const HKDF_SHA256_MAX: i64 = 255 * 32;
+
+extern "C" fn prim_hkdf_sha256(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let name = "crypto/hkdf-sha256";
+    let ikm = match extract_byte_data(ctx, unsafe { a.arg(args, nargs, 0) }, name, "ikm") {
+        Ok(d) => d,
+        Err(e) => return e,
+    };
+    let salt = match extract_byte_data(ctx, unsafe { a.arg(args, nargs, 1) }, name, "salt") {
+        Ok(d) => d,
+        Err(e) => return e,
+    };
+    let info = match extract_byte_data(ctx, unsafe { a.arg(args, nargs, 2) }, name, "info") {
+        Ok(d) => d,
+        Err(e) => return e,
+    };
+    let length = match a.get_int(unsafe { a.arg(args, nargs, 3) }) {
+        Some(n) => n,
+        None => return a.err(ctx, "type-error", &format!("{}: length must be an integer", name)),
+    };
+    if !(0..=HKDF_SHA256_MAX).contains(&length) {
+        return a.err(ctx, "range-error", &format!(
+            "{}: length must be from 0 to {}, got {}", name, HKDF_SHA256_MAX, length,
+        ));
+    }
+    // An empty salt keys HMAC with no bytes, which HMAC pads to the string
+    // of zeros that RFC 5869 names as the salt when none is given.
+    let mut okm = vec![0u8; length as usize];
+    Hkdf::<Sha256>::new(Some(&salt), &ikm)
+        .expand(&info, &mut okm)
+        .expect("a length within 255 blocks always expands");
+    a.ok(a.bytes(ctx, &okm))
+}
+
+// ── X25519 ────────────────────────────────────────────────────────────
+
+extern "C" fn prim_x25519_public(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let secret = match fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 0) }, "crypto/x25519-public", "secret") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    a.ok(a.bytes(ctx, X25519Public::from(&StaticSecret::from(secret)).as_bytes()))
+}
+
+extern "C" fn prim_x25519(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let name = "crypto/x25519";
+    let secret = match fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 0) }, name, "secret") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let public = match fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 1) }, name, "public key") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    let shared = StaticSecret::from(secret).diffie_hellman(&X25519Public::from(public));
+    // A public key of small order yields a secret that every party can
+    // compute, so it is refused rather than answered.
+    if !shared.was_contributory() {
+        return a.err(ctx, "value-error", &format!(
+            "{}: the public key has small order, so the shared secret is not secret", name,
+        ));
+    }
+    a.ok(a.bytes(ctx, shared.as_bytes()))
+}
+
+// ── XChaCha20-Poly1305 ────────────────────────────────────────────────
+
+/// The four arguments of seal and open: a 32-byte key, a 24-byte nonce, the
+/// message, and the associated data.
+type AeadArgs = ([u8; 32], [u8; 24], Vec<u8>, Vec<u8>);
+
+fn aead_args(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+    name: &str,
+    message: &str,
+) -> Result<AeadArgs, ElleResult> {
+    let a = api();
+    let key = fixed_bytes::<32>(ctx, unsafe { a.arg(args, nargs, 0) }, name, "key")?;
+    let nonce = fixed_bytes::<24>(ctx, unsafe { a.arg(args, nargs, 1) }, name, "nonce")?;
+    let msg = extract_byte_data(ctx, unsafe { a.arg(args, nargs, 2) }, name, message)?;
+    let aad = extract_byte_data(ctx, unsafe { a.arg(args, nargs, 3) }, name, "aad")?;
+    Ok((key, nonce, msg, aad))
+}
+
+extern "C" fn prim_xchacha20poly1305_seal(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let (key, nonce, plaintext, aad) =
+        match aead_args(ctx, args, nargs, "crypto/xchacha20poly1305-seal", "plaintext") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+    let sealed = XChaCha20Poly1305::new(&key.into())
+        .encrypt(&nonce.into(), Payload { msg: &plaintext, aad: &aad })
+        .expect("sealing into a Vec cannot run out of room");
+    a.ok(a.bytes(ctx, &sealed))
+}
+
+extern "C" fn prim_xchacha20poly1305_open(
+    ctx: *mut ElleCtx,
+    args: *const ElleValue,
+    nargs: usize,
+) -> ElleResult {
+    let a = api();
+    let (key, nonce, ciphertext, aad) =
+        match aead_args(ctx, args, nargs, "crypto/xchacha20poly1305-open", "ciphertext") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+    // A ciphertext that does not authenticate is the nil this answers, not
+    // a raise, as ed25519-verify answers false.
+    match XChaCha20Poly1305::new(&key.into())
+        .decrypt(&nonce.into(), Payload { msg: &ciphertext, aad: &aad })
+    {
+        Ok(plaintext) => a.ok(a.bytes(ctx, &plaintext)),
+        Err(_) => a.ok(a.nil()),
+    }
+}
+
 // ── Registration table ────────────────────────────────────────────────
 
 static PRIMITIVES: &[EllePrimDef] = &[
+    EllePrimDef::exact(
+        "crypto/hkdf-sha256", prim_hkdf_sha256, SIG_ERROR, 4,
+        "HKDF-SHA256 (RFC 5869). Takes (ikm, salt, info, length). Returns length bytes, at most 8160.",
+        "crypto",
+        "(bytes->hex (crypto/hkdf-sha256 \"ikm\" \"salt\" \"info\" 32))",
+    ),
+    EllePrimDef::exact(
+        "crypto/x25519-public", prim_x25519_public, SIG_ERROR, 1,
+        "The X25519 public key of a 32-byte secret. Returns 32 bytes.",
+        "crypto",
+        "(bytes->hex (crypto/x25519-public secret))",
+    ),
+    EllePrimDef::exact(
+        "crypto/x25519", prim_x25519, SIG_ERROR, 2,
+        "The X25519 shared secret of a 32-byte secret and another side's 32-byte public key. Returns 32 bytes; a public key of small order is a value-error.",
+        "crypto",
+        "(bytes->hex (crypto/x25519 secret their-public))",
+    ),
+    EllePrimDef::exact(
+        "crypto/xchacha20poly1305-seal", prim_xchacha20poly1305_seal, SIG_ERROR, 4,
+        "Encrypt with XChaCha20-Poly1305. Takes (key, nonce, plaintext, aad): a 32-byte key and a 24-byte nonce. Returns the ciphertext followed by its 16-byte tag.",
+        "crypto",
+        "(crypto/xchacha20poly1305-seal key nonce \"message\" \"\")",
+    ),
+    EllePrimDef::exact(
+        "crypto/xchacha20poly1305-open", prim_xchacha20poly1305_open, SIG_ERROR, 4,
+        "Decrypt with XChaCha20-Poly1305. Takes (key, nonce, ciphertext, aad). Returns the plaintext, or nil when the ciphertext does not authenticate.",
+        "crypto",
+        "(crypto/xchacha20poly1305-open key nonce sealed \"\")",
+    ),
     EllePrimDef::exact(
         "crypto/ed25519-public", prim_ed25519_public, SIG_ERROR, 1,
         "The Ed25519 public key of a 32-byte seed. Returns 32 bytes.",
