@@ -67,3 +67,124 @@
   (assert (and (not ok?) (= (get err :error) :range-error)) "ed25519-verify: a short signature is a range-error"))
 (let [[ok? err] (protect (ed-sign 42 "m"))]
   (assert (and (not ok?) (= (get err :error) :type-error)) "ed25519-sign: a seed that is not bytes is a type-error"))
+
+## ── HKDF-SHA256 ──────────────────────────────────────────────────
+## Test cases 1 and 3 of RFC 5869 Appendix A. Case 3 has an empty salt and
+## an empty info.
+
+(def hkdf (get plugin :hkdf-sha256))
+
+(assert (= (bytes->hex (hkdf (hex->bytes "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+                             (hex->bytes "000102030405060708090a0b0c")
+                             (hex->bytes "f0f1f2f3f4f5f6f7f8f9")
+                             42))
+           (string "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf"
+                   "34007208d5b887185865"))
+        "hkdf-sha256 reproduces RFC 5869 test case 1")
+(assert (= (bytes->hex (hkdf (hex->bytes "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b") "" "" 42))
+           (string "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d"
+                   "9d201395faa4b61a96c8"))
+        "hkdf-sha256 reproduces RFC 5869 test case 3, with an empty salt and info")
+(assert (= (length (hkdf "ikm" "salt" "info" 8160)) 8160) "hkdf-sha256 expands to 255 blocks")
+(assert (= (length (hkdf "ikm" "salt" "info" 0)) 0) "hkdf-sha256 expands to nothing")
+(let [[ok? err] (protect (hkdf "ikm" "salt" "info" 8161))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "hkdf-sha256: a length past 8160 is a range-error"))
+(let [[ok? err] (protect (hkdf "ikm" "salt" "info" -1))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "hkdf-sha256: a negative length is a range-error"))
+(let [[ok? err] (protect (hkdf "ikm" "salt" "info" "32"))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "hkdf-sha256: a length that is not an integer is a type-error"))
+(let [[ok? err] (protect (hkdf 1 "salt" "info" 32))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "hkdf-sha256: ikm that is not bytes is a type-error"))
+(let [[ok? err] (protect (hkdf "ikm" 1 "info" 32))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "hkdf-sha256: a salt that is not bytes is a type-error"))
+(let [[ok? err] (protect (hkdf "ikm" "salt" 1 32))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "hkdf-sha256: info that is not bytes is a type-error"))
+
+## ── X25519 ───────────────────────────────────────────────────────
+## The Diffie-Hellman vector of RFC 7748 §6.1.
+
+(def x-public (get plugin :x25519-public))
+(def x-shared (get plugin :x25519))
+
+(def alice-secret (hex->bytes "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"))
+(def alice-public "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")
+(def bob-secret   (hex->bytes "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"))
+(def bob-public   "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
+(def shared-k     "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742")
+
+(assert (= (bytes->hex (x-public alice-secret)) alice-public) "x25519-public derives Alice's RFC 7748 public key")
+(assert (= (bytes->hex (x-public bob-secret)) bob-public) "x25519-public derives Bob's RFC 7748 public key")
+(assert (= (bytes->hex (x-shared alice-secret (hex->bytes bob-public))) shared-k)
+        "x25519 gives Alice the RFC 7748 shared secret")
+(assert (= (bytes->hex (x-shared bob-secret (hex->bytes alice-public))) shared-k)
+        "x25519 gives Bob the RFC 7748 shared secret")
+
+(def zero-32 (hex->bytes "0000000000000000000000000000000000000000000000000000000000000000"))
+(let [[ok? err] (protect (x-shared alice-secret zero-32))]
+  (assert (and (not ok?) (= (get err :error) :value-error))
+          "x25519: a public key of small order is a value-error"))
+(let [[ok? err] (protect (x-public (bytes 1 2 3)))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "x25519-public: a short secret is a range-error"))
+(let [[ok? err] (protect (x-shared (bytes 1 2 3) (hex->bytes bob-public)))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "x25519: a short secret is a range-error"))
+(let [[ok? err] (protect (x-shared alice-secret (bytes 1 2 3)))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "x25519: a short public key is a range-error"))
+(let [[ok? err] (protect (x-public 42))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "x25519-public: a secret that is not bytes is a type-error"))
+
+## ── XChaCha20-Poly1305 ───────────────────────────────────────────
+## The vector of draft-irtf-cfrg-xchacha Appendix A.3.1.
+
+(def seal (get plugin :xchacha20poly1305-seal))
+(def open (get plugin :xchacha20poly1305-open))
+
+(def xc-key   (hex->bytes "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
+(def xc-nonce (hex->bytes "404142434445464748494a4b4c4d4e4f5051525354555657"))
+(def xc-aad   (hex->bytes "50515253c0c1c2c3c4c5c6c7"))
+(def xc-plain "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.")
+(def xc-sealed (string "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb"
+                       "731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b452"
+                       "2f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff9"
+                       "21f9664c97637da9768812f615c68b13b52e"
+                       "c0875924c1c7987947deafd8780acf49"))
+
+(assert (= (bytes->hex (seal xc-key xc-nonce xc-plain xc-aad)) xc-sealed)
+        "xchacha20poly1305-seal reproduces the draft-irtf-cfrg-xchacha ciphertext and tag")
+(assert (= (bytes->hex (open xc-key xc-nonce (hex->bytes xc-sealed) xc-aad))
+           (bytes->hex (bytes xc-plain)))
+        "xchacha20poly1305-open recovers the plaintext")
+(assert (= (bytes->hex (open xc-key xc-nonce (seal xc-key xc-nonce "" "") ""))
+           "")
+        "an empty message round-trips")
+
+(defn flip-first [b]
+  "b with its first byte inverted."
+  (let [out (thaw b)]
+    (put out 0 (bit/xor (get out 0) 255))
+    (freeze out)))
+
+(assert (nil? (open xc-key xc-nonce (flip-first (hex->bytes xc-sealed)) xc-aad))
+        "xchacha20poly1305-open answers nil for a changed ciphertext")
+(assert (nil? (open (flip-first xc-key) xc-nonce (hex->bytes xc-sealed) xc-aad))
+        "xchacha20poly1305-open answers nil under another key")
+(assert (nil? (open xc-key (flip-first xc-nonce) (hex->bytes xc-sealed) xc-aad))
+        "xchacha20poly1305-open answers nil under another nonce")
+(assert (nil? (open xc-key xc-nonce (hex->bytes xc-sealed) "other"))
+        "xchacha20poly1305-open answers nil for other associated data")
+(assert (nil? (open xc-key xc-nonce (bytes 1 2 3) xc-aad))
+        "xchacha20poly1305-open answers nil for input shorter than a tag")
+
+(let [[ok? err] (protect (seal (bytes 1 2 3) xc-nonce "m" ""))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "xchacha20poly1305-seal: a short key is a range-error"))
+(let [[ok? err] (protect (seal xc-key (bytes 1 2 3) "m" ""))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "xchacha20poly1305-seal: a short nonce is a range-error"))
+(let [[ok? err] (protect (open (bytes 1 2 3) xc-nonce (hex->bytes xc-sealed) ""))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "xchacha20poly1305-open: a short key is a range-error"))
+(let [[ok? err] (protect (open xc-key (bytes 1 2 3) (hex->bytes xc-sealed) ""))]
+  (assert (and (not ok?) (= (get err :error) :range-error)) "xchacha20poly1305-open: a short nonce is a range-error"))
+(let [[ok? err] (protect (seal xc-key xc-nonce 42 ""))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "xchacha20poly1305-seal: a plaintext that is not bytes is a type-error"))
+(let [[ok? err] (protect (seal xc-key xc-nonce "m" 42))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "xchacha20poly1305-seal: aad that is not bytes is a type-error"))
+(let [[ok? err] (protect (open xc-key xc-nonce 42 ""))]
+  (assert (and (not ok?) (= (get err :error) :type-error)) "xchacha20poly1305-open: a ciphertext that is not bytes is a type-error"))
