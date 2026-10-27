@@ -76,6 +76,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | `egui/` | Immediate-mode GUI via egui |
 | `hash/` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
 | `jiff/` | Date/time operations |
+| `markdown/` | CommonMark rendered to HTML |
 | `mqtt/` | MQTT packet codec |
 | `msgpack/` | MessagePack serialization |
 | `oxigraph/` | RDF quad store with SPARQL |
@@ -123,6 +124,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | `hash/` | Universal hashing |
 | `image/` | Image processing |
 | `jiff/` | Date/time |
+| `markdown/` | Markdown to HTML |
 | `mqtt/` | MQTT codec |
 | `msgpack/` | MessagePack |
 | `oxigraph/` | RDF store |

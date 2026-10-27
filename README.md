@@ -54,6 +54,7 @@ elle --path=/path/to/plugins/target/release
 | `elle-hash` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
 | `elle-image` | Image processing |
 | `elle-jiff` | Date/time operations |
+| `elle-markdown` | CommonMark rendered to HTML |
 | `elle-mqtt` | MQTT client |
 | `elle-msgpack` | MessagePack serialization |
 | `elle-oxigraph` | RDF triple store |

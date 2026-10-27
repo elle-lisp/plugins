@@ -24,6 +24,7 @@ jobs:
           - hash
           - image
           - jiff
+          - markdown
           - mqtt
           - msgpack
           - oxigraph
