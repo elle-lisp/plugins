@@ -201,11 +201,9 @@ impl WindowState {
         ix.closed = self.close_requested;
 
         let widget_state = &mut self.widget_state;
-        let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                crate::ui::render_tree(ui, nodes, widget_state, ix);
-            });
-        });
+        let full_output = self
+            .egui_ctx
+            .run(raw_input, |ctx| crate::ui::show(ctx, nodes, widget_state, ix));
 
         egui_winit.handle_platform_output(window, full_output.platform_output);
 

@@ -5,6 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::api;
 
+#[cfg(test)]
+mod tests;
+
 // ── UiNode ──────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -28,6 +31,7 @@ pub enum UiNode {
     Collapsing { id: String, title: String, children: Vec<UiNode> },
     Group { children: Vec<UiNode> },
     Grid { id: String, columns: usize, children: Vec<UiNode> },
+    SidePanel { id: String, side: egui::panel::Side, width: f32, children: Vec<UiNode> },
 }
 
 // ── Interactions ─────────────────────────────────────────────────────
@@ -75,6 +79,19 @@ fn get_prop_int(props: ElleValue, key: &str) -> Option<i64> {
     a.get_int(v)
 }
 
+fn side_refused(got: impl std::fmt::Display) -> String {
+    format!("side-panel :side must be :left or :right, got {}", got)
+}
+
+/// The edge a side panel's `:side` names, `:left` when absent.
+pub fn panel_side(name: Option<&str>) -> Result<egui::panel::Side, String> {
+    match name {
+        None | Some("left") => Ok(egui::panel::Side::Left),
+        Some("right") => Ok(egui::panel::Side::Right),
+        Some(other) => Err(side_refused(format!(":{}", other))),
+    }
+}
+
 pub fn value_to_node(ctx: *mut ElleCtx, val: ElleValue) -> Result<UiNode, String> {
     let a = api();
     let len = a.get_array_len(val)
@@ -104,6 +121,9 @@ pub fn value_to_node(ctx: *mut ElleCtx, val: ElleValue) -> Result<UiNode, String
     // Collect rest elements
     let rest_count = len - rest_start;
     let rest_item = |i: usize| a.get_array_item(val, rest_start + i);
+    let children = |from: usize| -> Result<Vec<UiNode>, String> {
+        (from..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect()
+    };
 
     match tag.as_str() {
         "label" => {
@@ -156,27 +176,36 @@ pub fn value_to_node(ctx: *mut ElleCtx, val: ElleValue) -> Result<UiNode, String
             } else { Vec::new() };
             Ok(UiNode::ComboBox { id, options })
         }
-        "v-layout" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::VLayout { children: children? }) }
-        "h-layout" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::HLayout { children: children? }) }
-        "centered" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::Centered { children: children? }) }
-        "centered-justified" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::CenteredJustified { children: children? }) }
+        "v-layout" => Ok(UiNode::VLayout { children: children(0)? }),
+        "h-layout" => Ok(UiNode::HLayout { children: children(0)? }),
+        "centered" => Ok(UiNode::Centered { children: children(0)? }),
+        "centered-justified" => Ok(UiNode::CenteredJustified { children: children(0)? }),
         "scroll-area" => {
             let id = get_prop_id(ctx, props_v).ok_or("scroll-area requires :id")?;
-            let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect();
-            Ok(UiNode::ScrollArea { id, children: children? })
+            Ok(UiNode::ScrollArea { id, children: children(0)? })
         }
         "collapsing" => {
             let id = get_prop_id(ctx, props_v).ok_or("collapsing requires :id")?;
             let title = if rest_count > 0 { a.get_string(rest_item(0)).unwrap_or("").to_string() } else { String::new() };
-            let children: Result<Vec<_>, _> = (1..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect();
-            Ok(UiNode::Collapsing { id, title, children: children? })
+            Ok(UiNode::Collapsing { id, title, children: children(1)? })
         }
-        "group" => { let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect(); Ok(UiNode::Group { children: children? }) }
+        "group" => Ok(UiNode::Group { children: children(0)? }),
         "grid" => {
             let id = get_prop_id(ctx, props_v).ok_or("grid requires :id")?;
             let columns = get_prop_int(props_v, "columns").unwrap_or(2) as usize;
-            let children: Result<Vec<_>, _> = (0..rest_count).map(|i| value_to_node(ctx, rest_item(i))).collect();
-            Ok(UiNode::Grid { id, columns, children: children? })
+            Ok(UiNode::Grid { id, columns, children: children(0)? })
+        }
+        "side-panel" => {
+            let id = get_prop_id(ctx, props_v).ok_or("side-panel requires :id")?;
+            let side_v = a.get_struct_field(props_v, "side");
+            let name = if a.check_nil(side_v) {
+                None
+            } else {
+                Some(a.get_keyword_name(ctx, side_v).ok_or_else(|| side_refused(a.type_name(side_v)))?)
+            };
+            let side = panel_side(name)?;
+            let width = get_prop_float(props_v, "width").unwrap_or(200.0) as f32;
+            Ok(UiNode::SidePanel { id, side, width, children: children(0)? })
         }
         other => Err(format!("unknown ui node type: :{}", other)),
     }
@@ -209,6 +238,11 @@ impl WidgetState {
     pub fn new() -> Self {
         Self { text_buffers: HashMap::new(), check_states: HashMap::new(), slider_states: HashMap::new(), combo_states: HashMap::new(), collapsed_states: HashMap::new() }
     }
+}
+
+/// Draw a frame's tree from the top down, inside a central panel that fills the window.
+pub fn show(ctx: &egui::Context, nodes: &[UiNode], state: &mut WidgetState, ix: &mut Interactions) {
+    egui::CentralPanel::default().show(ctx, |ui| render_tree(ui, nodes, state, ix));
 }
 
 pub fn render_tree(ui: &mut egui::Ui, nodes: &[UiNode], state: &mut WidgetState, ix: &mut Interactions) {
@@ -276,6 +310,16 @@ fn render_node(ui: &mut egui::Ui, node: &UiNode, state: &mut WidgetState, ix: &m
                     if (i + 1) % columns == 0 { ui.end_row(); }
                 }
             });
+        }
+        UiNode::SidePanel { id, side, width, children } => {
+            egui::SidePanel::new(*side, egui::Id::new(id.as_str()))
+                .default_width(*width)
+                .show_inside(ui, |ui| {
+                    // egui saves the frame's width for the next frame, so a
+                    // frame that shrank to short content would stay narrow.
+                    ui.set_min_width(ui.available_width());
+                    render_tree(ui, children, state, ix)
+                });
         }
     }
 }
