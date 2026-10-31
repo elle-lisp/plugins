@@ -5,6 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::api;
 
+#[cfg(test)]
+mod tests;
+
 // ── UiNode ──────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
