@@ -1,8 +1,9 @@
 //! Side panels, laid out and clicked in a headless egui context.
 //!
 //! The counter-factual: the tree's only containers were layouts inside the
-//! central panel, and a scroll area in an h-layout took one row's height, so
-//! a list beside a detail pane never reached the bottom of the window.
+//! central panel. A scroll area in an h-layout takes the height of its row,
+//! which the nodes beside it set, so a long list beside a short detail pane
+//! stops where the detail pane ends.
 
 use super::*;
 use egui::panel::{PanelState, Side};
