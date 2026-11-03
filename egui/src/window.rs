@@ -166,6 +166,21 @@ impl WindowState {
         })
     }
 
+    /// Release the window's resources. Everything that uses the display
+    /// connection goes before the event loop, which owns the connection:
+    /// the clipboard inside `egui_winit` destroys Wayland proxies as it drops.
+    /// A second call finds nothing left to release.
+    pub fn close(&mut self) {
+        self.close_requested = true;
+        self.painter = None;
+        self.egui_winit = None;
+        self.gl = None;
+        self.gl_context = None;
+        self.gl_surface = None;
+        self.window = None;
+        self.event_loop = None;
+    }
+
     /// Non-blocking pump of winit events.
     pub fn pump_events(&mut self) {
         if let Some(mut event_loop) = self.event_loop.take() {
@@ -218,6 +233,13 @@ impl WindowState {
         );
 
         gl_surface.swap_buffers(gl_context).unwrap();
+    }
+}
+
+/// Fields drop in declaration order, which puts the event loop first.
+impl Drop for WindowState {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
