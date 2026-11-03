@@ -23,7 +23,8 @@ struct ChartOpts {
     y_range: Option<(f64, f64)>,
     colors: Vec<RGBColor>,
     bins: usize,
-    legend: bool,
+    /// Where the legend stands, or `None` where `:legend` hides it.
+    legend: Option<SeriesLabelPosition>,
 }
 
 impl Default for ChartOpts {
@@ -39,7 +40,7 @@ impl Default for ChartOpts {
             y_range: None,
             colors: default_palette(),
             bins: 20,
-            legend: true,
+            legend: Some(SeriesLabelPosition::MiddleRight),
         }
     }
 }
@@ -58,6 +59,16 @@ struct SeriesSpec {
     data: Vec<(f64, f64)>,
     color: Option<RGBColor>,
     size: Option<u32>,
+    /// Whether an area strokes its outline. Every other kind ignores it.
+    border: bool,
+}
+
+impl SeriesSpec {
+    /// One unlabelled series in the palette's first color, as the
+    /// one-series primitives draw it.
+    fn bare(kind: SeriesKind, data: Vec<(f64, f64)>) -> Self {
+        Self { kind, label: None, data, color: None, size: None, border: true }
+    }
 }
 
 // ── Palette ──────────────────────────────────────────────────────────
@@ -136,10 +147,30 @@ fn parse_range(a: &elle_plugin::Api, val: ElleValue) -> Option<(f64, f64)> {
     ))
 }
 
-fn parse_opts(ctx: *mut ElleCtx, a: &elle_plugin::Api, val: ElleValue) -> ChartOpts {
+/// The place a `:legend` keyword names, or `None` where it names none.
+fn legend_place(name: &str) -> Option<SeriesLabelPosition> {
+    Some(match name {
+        "upper-left" => SeriesLabelPosition::UpperLeft,
+        "upper-middle" => SeriesLabelPosition::UpperMiddle,
+        "upper-right" => SeriesLabelPosition::UpperRight,
+        "middle-left" => SeriesLabelPosition::MiddleLeft,
+        "middle-middle" => SeriesLabelPosition::MiddleMiddle,
+        "middle-right" => SeriesLabelPosition::MiddleRight,
+        "lower-left" => SeriesLabelPosition::LowerLeft,
+        "lower-middle" => SeriesLabelPosition::LowerMiddle,
+        "lower-right" => SeriesLabelPosition::LowerRight,
+        _ => return None,
+    })
+}
+
+fn parse_opts(
+    ctx: *mut ElleCtx,
+    a: &elle_plugin::Api,
+    val: ElleValue,
+) -> Result<ChartOpts, ElleResult> {
     let mut o = ChartOpts::default();
     if !a.check_struct(val) {
-        return o;
+        return Ok(o);
     }
     if let Some(s) = a.get_string(a.get_struct_field(val, "title")) {
         o.title = Some(s.to_string());
@@ -168,12 +199,18 @@ fn parse_opts(ctx: *mut ElleCtx, a: &elle_plugin::Api, val: ElleValue) -> ChartO
     if let Some(r) = parse_range(a, a.get_struct_field(val, "y-range")) {
         o.y_range = Some(r);
     }
-    // :legend false — check for boolean false, int 0, or keyword :false
+    // :legend false or 0 hides the legend, and a keyword names its place.
     let legend_val = a.get_struct_field(val, "legend");
-    if let Some(b) = a.get_bool(legend_val) {
-        o.legend = b;
-    } else if a.get_int(legend_val) == Some(0) {
-        o.legend = false;
+    if a.get_bool(legend_val) == Some(false) || a.get_int(legend_val) == Some(0) {
+        o.legend = None;
+    } else if let Some(name) = a.get_keyword_name(ctx, legend_val) {
+        o.legend = Some(legend_place(name).ok_or_else(|| {
+            a.err(
+                ctx,
+                "value-error",
+                &format!(":legend :{} names no place; use :upper-left, :middle-right, :lower-middle or the like", name),
+            )
+        })?);
     }
     if let Some(c) = parse_color(ctx, a, a.get_struct_field(val, "color")) {
         o.colors = vec![c];
@@ -186,7 +223,22 @@ fn parse_opts(ctx: *mut ElleCtx, a: &elle_plugin::Api, val: ElleValue) -> ChartO
             o.colors = cs;
         }
     }
-    o
+    Ok(o)
+}
+
+/// The options at argument `i`, or the defaults where the call passed none.
+fn opts_arg(
+    ctx: *mut ElleCtx,
+    a: &elle_plugin::Api,
+    args: *const ElleValue,
+    nargs: usize,
+    i: usize,
+) -> Result<ChartOpts, ElleResult> {
+    if nargs > i {
+        parse_opts(ctx, a, unsafe { a.arg(args, nargs, i) })
+    } else {
+        Ok(ChartOpts::default())
+    }
 }
 
 fn extract_points(
@@ -360,12 +412,9 @@ fn draw_xy<DB: DrawingBackend>(
                 }
             }
             SeriesKind::Area => {
-                let d = chart
-                    .draw_series(
-                        AreaSeries::new(s.data.iter().copied(), 0.0, c.mix(0.3))
-                            .border_style(c.stroke_width(2)),
-                    )
-                    .map_err(|e| e.to_string())?;
+                let fill = AreaSeries::new(s.data.iter().copied(), 0.0, c.mix(0.3));
+                let area = if s.border { fill.border_style(c.stroke_width(2)) } else { fill };
+                let d = chart.draw_series(area).map_err(|e| e.to_string())?;
                 if let Some(ref lbl) = s.label {
                     d.label(lbl).legend(move |(x, y)| {
                         Rectangle::new([(x, y - 5), (x + 20, y + 5)], c.mix(0.3).filled())
@@ -427,9 +476,10 @@ fn draw_xy<DB: DrawingBackend>(
         }
     }
 
-    if has_labels && opts.legend {
+    if let (true, Some(place)) = (has_labels, opts.legend.clone()) {
         chart
             .configure_series_labels()
+            .position(place)
             .background_style(WHITE.mix(0.8))
             .border_style(BLACK)
             .draw()
@@ -643,9 +693,11 @@ extern "C" fn prim_line(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize)
         Ok(p) => p,
         Err(e) => return e,
     };
-    let opts =
-        if nargs > 1 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
-    let series = vec![SeriesSpec { kind: SeriesKind::Line, label: None, data: pts, color: None, size: None }];
+    let opts = match opts_arg(ctx, a, args, nargs, 1) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
+    let series = vec![SeriesSpec::bare(SeriesKind::Line, pts)];
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err(ctx, "plotters-error", &format!("plotters/line: {}", e)),
@@ -658,10 +710,11 @@ extern "C" fn prim_scatter(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usi
         Ok(p) => p,
         Err(e) => return e,
     };
-    let opts =
-        if nargs > 1 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
-    let series =
-        vec![SeriesSpec { kind: SeriesKind::Scatter, label: None, data: pts, color: None, size: None }];
+    let opts = match opts_arg(ctx, a, args, nargs, 1) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
+    let series = vec![SeriesSpec::bare(SeriesKind::Scatter, pts)];
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err(ctx, "plotters-error", &format!("plotters/scatter: {}", e)),
@@ -674,9 +727,11 @@ extern "C" fn prim_area(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize)
         Ok(p) => p,
         Err(e) => return e,
     };
-    let opts =
-        if nargs > 1 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) }) } else { ChartOpts::default() };
-    let series = vec![SeriesSpec { kind: SeriesKind::Area, label: None, data: pts, color: None, size: None }];
+    let opts = match opts_arg(ctx, a, args, nargs, 1) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
+    let series = vec![SeriesSpec::bare(SeriesKind::Area, pts)];
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err(ctx, "plotters-error", &format!("plotters/area: {}", e)),
@@ -703,8 +758,10 @@ extern "C" fn prim_bar(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) 
             ),
         );
     }
-    let opts =
-        if nargs > 2 { parse_opts(ctx, a, unsafe { a.arg(args, nargs, 2) }) } else { ChartOpts::default() };
+    let opts = match opts_arg(ctx, a, args, nargs, 2) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
     match render_bar_chart(ctx, &labels, &values, &opts) {
         Ok(v) => a.ok(v),
         Err(e) => a.err(ctx, "plotters-error", &format!("plotters/bar: {}", e)),
@@ -717,10 +774,9 @@ extern "C" fn prim_histogram(ctx: *mut ElleCtx, args: *const ElleValue, nargs: u
         Ok(v) => v,
         Err(e) => return e,
     };
-    let opts = if nargs > 1 {
-        parse_opts(ctx, a, unsafe { a.arg(args, nargs, 1) })
-    } else {
-        ChartOpts::default()
+    let opts = match opts_arg(ctx, a, args, nargs, 1) {
+        Ok(o) => o,
+        Err(e) => return e,
     };
     match render_histogram(ctx, &vals, &opts) {
         Ok(v) => a.ok(v),
@@ -737,7 +793,10 @@ extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
             &format!("plotters/chart: expected struct, got {}", a.type_name(spec)),
         );
     }
-    let opts = parse_opts(ctx, a, spec);
+    let opts = match parse_opts(ctx, a, spec) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
     let sv = a.get_struct_field(spec, "series");
     let slen = match a.get_array_len(sv) {
         Some(n) => n,
@@ -779,7 +838,8 @@ extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
         };
         let color = parse_color(ctx, a, a.get_struct_field(s, "color"));
         let size = a.get_int(a.get_struct_field(s, "size")).map(|v| v.max(1) as u32);
-        series.push(SeriesSpec { kind, label, data, color, size });
+        let border = a.get_bool(a.get_struct_field(s, "border")) != Some(false);
+        series.push(SeriesSpec { kind, label, data, color, size, border });
     }
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
