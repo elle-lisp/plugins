@@ -1,6 +1,6 @@
 # elle-egui
 
-<!-- audited: 2026-10-30 -->
+<!-- audited: 2026-11-02 -->
 
 An immediate-mode GUI plugin for Elle: a window, and frames drawn from a tree of widget nodes, via `egui`, `winit` and `glow`.
 
@@ -47,7 +47,14 @@ constructor for each node. The plugin alone draws one frame per call:
 The options of `egui/open` are optional: a struct with `:title`, default
 `"Elle"`, and `:width` and `:height` in logical pixels, default 800 by 600.
 `egui/display-fd` answers nil on a platform with no display descriptor, such
-as macOS.
+as macOS. A process opens one window, because `winit` builds one event loop
+per process. A second `egui/open` is an `:egui-error`, even after
+`egui/close`.
+
+A window still open when Elle frees its handle, for example when the program
+exits, closes the same way `egui/close` closes it. The display connection
+stays up until everything that uses it is gone, so a program that never calls
+`egui/close` still exits cleanly.
 
 ## The tree
 

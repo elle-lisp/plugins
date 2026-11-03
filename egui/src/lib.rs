@@ -77,15 +77,7 @@ extern "C" fn prim_frame(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
 extern "C" fn prim_close(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
     let state = match get_state(ctx, unsafe { a.arg(args, nargs, 0) }) { Ok(s) => s, Err(e) => return e };
-    let mut state = state.borrow_mut();
-    state.close_requested = true;
-    state.painter = None;
-    state.egui_winit = None;
-    state.gl = None;
-    state.gl_context = None;
-    state.gl_surface = None;
-    state.window = None;
-    state.event_loop = None;
+    state.borrow_mut().close();
     a.ok(a.nil())
 }
 
