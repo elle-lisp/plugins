@@ -845,7 +845,7 @@ static PRIMITIVES: &[EllePrimDef] = &[
         prim_chart,
         SIG_ERROR,
         1,
-        "Multi-series chart. Spec: {:series [{:type :line/:scatter/:area/:bar :data [[x y]...] :label str :color}] :title :x-label :y-label :width :height :format :x-range :y-range}. Colors accept :keyword, [r g b], or \"#rrggbb\".",
+        "Multi-series chart. Spec: {:series [{:type :line/:scatter/:area/:bar :data [[x y]...] :label str :color :size :border}] :title :x-label :y-label :width :height :format :x-range :y-range :legend}. Colors accept :keyword, [r g b], or \"#rrggbb\". An area strokes its outline in its own color unless its :border is false. :legend false hides the legend, and a place moves it: :upper-left, :upper-middle, :upper-right, :middle-left, :middle-middle, :middle-right (the default), :lower-left, :lower-middle or :lower-right. Any other :legend keyword is a :value-error.",
         "plotters",
         "(plotters/chart {:title \"Compare\" :series [{:type :line :label \"A\" :data [[1 10] [2 20]]}]})",
     ),
