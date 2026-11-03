@@ -91,6 +91,60 @@
                            :series [{:type :line :data [[1 1] [2 2]]}]}))
 (assert (string? multi-svg) "multi-series SVG returns string")
 
+# ── An area's outline, and the legend's place ────────────────────────
+
+## An area fills in its color at a third of its strength and strokes its
+## outline in the color itself. The fill is written `fill=`, so a stroke in
+## the color is the outline. The counter-factual is a fill that covers most of
+## a chart: its outline traces every gap in it.
+(def red-area {:type :area :color "#d62728"
+               :data [[0 0] [0 1] [1 1] [1 0] [2 0] [2 1] [3 1] [3 0]]})
+(def outlined (plt:chart {:format :svg :series [red-area]}))
+(assert (string/contains? outlined "stroke=\"#D62728\"")
+        "an area strokes its outline")
+(def bare (plt:chart {:format :svg :series [(put red-area :border false)]}))
+(assert (string/contains? bare "fill=\"#D62728\"")
+        "an area whose border is false still fills")
+(assert (not (string/contains? bare "stroke=\"#D62728\""))
+        "and strokes no outline")
+
+## Where the legend writes the text `label`: the place of the last `<text`
+## that opens before the label's own line, as [x y], or nil.
+(defn legend-at [svg label]
+  (def at (string/find svg (string ">\n" label "\n</text>")))
+  (var open nil)
+  (var found (string/find svg "<text x=\""))
+  (while (and (not (nil? found)) (not (nil? at)) (< found at))
+    (assign open found)
+    (assign found (string/find svg "<text x=\"" (+ found 1))))
+  (when (not (nil? open))
+    (def number
+      (fn [key]
+        (def start (+ (string/find svg (string key "=\"") open)
+                      (length key) 2))
+        (parse-float (slice svg start (string/find svg "\"" start)))))
+    [(number "x") (number "y")]))
+
+## The legend stands at the middle of the right edge unless `:legend` places
+## it, and a place it names nowhere is refused rather than read as the
+## default. The counter-factual is a chart that drops the place: its legend
+## sits over the right of the data whatever the caller asked.
+(def labelled {:format :svg :width 400 :height 300
+               :series [{:type :line :label "legend-a" :data [[0 0] [1 1]]}]})
+(def right (legend-at (plt:chart labelled) "legend-a"))
+(assert (> (get (or right [0 0]) 0) 200) "a legend stands at the right")
+(def left
+  (legend-at (plt:chart (put labelled :legend :upper-left)) "legend-a"))
+(assert (< (get (or left [400 300]) 0) 200)
+        "and at the left where :legend is :upper-left")
+(assert (< (get (or left [400 300]) 1) (get (or right [0 0]) 1))
+        "and above where it stood by default")
+(assert (not (string/contains? (plt:chart (put labelled :legend false))
+                               "legend-a"))
+        "and nowhere where :legend is false")
+(def [placed? _] (protect (plt:chart (put labelled :legend :sideways))))
+(assert (not placed?) "a :legend that names no place is refused")
+
 # ── Type errors ───────────────────────────────────────────────────────
 
 (def [ok1? _] (protect (plt:line "not an array")))
