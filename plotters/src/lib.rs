@@ -61,13 +61,23 @@ struct SeriesSpec {
     size: Option<u32>,
     /// Whether an area strokes its outline. Every other kind ignores it.
     border: bool,
+    /// The y an area fills down (or up) to. Every other kind ignores it.
+    baseline: f64,
 }
 
 impl SeriesSpec {
     /// One unlabelled series in the palette's first color, as the
     /// one-series primitives draw it.
     fn bare(kind: SeriesKind, data: Vec<(f64, f64)>) -> Self {
-        Self { kind, label: None, data, color: None, size: None, border: true }
+        Self {
+            kind,
+            label: None,
+            data,
+            color: None,
+            size: None,
+            border: true,
+            baseline: 0.0,
+        }
     }
 }
 
@@ -412,7 +422,7 @@ fn draw_xy<DB: DrawingBackend>(
                 }
             }
             SeriesKind::Area => {
-                let fill = AreaSeries::new(s.data.iter().copied(), 0.0, c.mix(0.3));
+                let fill = AreaSeries::new(s.data.iter().copied(), s.baseline, c.mix(0.3));
                 let area = if s.border { fill.border_style(c.stroke_width(2)) } else { fill };
                 let d = chart.draw_series(area).map_err(|e| e.to_string())?;
                 if let Some(ref lbl) = s.label {
@@ -839,7 +849,27 @@ extern "C" fn prim_chart(ctx: *mut ElleCtx, args: *const ElleValue, nargs: usize
         let color = parse_color(ctx, a, a.get_struct_field(s, "color"));
         let size = a.get_int(a.get_struct_field(s, "size")).map(|v| v.max(1) as u32);
         let border = a.get_bool(a.get_struct_field(s, "border")) != Some(false);
-        series.push(SeriesSpec { kind, label, data, color, size, border });
+        let baseline_val = a.get_struct_field(s, "baseline");
+        let baseline = match num(a, baseline_val) {
+            Some(b) => b,
+            None if a.check_nil(baseline_val) => 0.0,
+            None => {
+                return a.err(
+                    ctx,
+                    "type-error",
+                    &format!("plotters/chart: series[{}] :baseline must be a number", i),
+                )
+            }
+        };
+        series.push(SeriesSpec {
+            kind,
+            label,
+            data,
+            color,
+            size,
+            border,
+            baseline,
+        });
     }
     match render_xy_chart(ctx, &series, &opts) {
         Ok(v) => a.ok(v),
