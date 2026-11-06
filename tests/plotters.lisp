@@ -145,6 +145,38 @@
 (def [placed? _] (protect (plt:chart (put labelled :legend :sideways))))
 (assert (not placed?) "a :legend that names no place is refused")
 
+# ── An area's baseline ───────────────────────────────────────────────
+
+## The pixel rows of the first polygon `svg` draws. An area's fill is the one
+## polygon a chart of one area writes, so its largest row is the fill's floor
+## and its smallest the fill's top. The axes are polylines, which write
+## `points=` too.
+(defn polygon-rows [svg]
+  (def start (+ (string/find svg "points=\"" (string/find svg "<polygon")) 8))
+  (def points (slice svg start (string/find svg "\"" start)))
+  (map (fn [pair] (parse-float (get (string/split pair ",") 1)))
+       (filter (fn [p] (not (= p ""))) (string/split points " "))))
+
+(defn depth [svg]
+  (def rows (polygon-rows svg))
+  (- (reduce max (get rows 0) rows) (reduce min (get rows 0) rows)))
+
+## An area fills from its data to its baseline, which is 0 unless the series
+## names one. A band at 1 over an axis from -1 to 1 reaches twice as far down
+## to a baseline of -1 as to 0. The counter-factual is a baseline held at 0: a
+## fill meant to reach below the axis stops at its middle.
+(def at-one {:type :area :color "#d62728" :data [[0 1] [1 1]]})
+(def banded {:format :svg :width 400 :height 300 :y-range [-1 1]})
+(def to-zero (depth (plt:chart (put banded :series [at-one]))))
+(def to-minus-one
+  (depth (plt:chart (put banded :series [(put at-one :baseline -1)]))))
+(assert (> to-zero 0) "an area fills down to zero by default")
+(assert (< (abs (- to-minus-one (* 2 to-zero))) 2)
+        "and down to the baseline it names")
+(def [based? _]
+  (protect (plt:chart (put banded :series [(put at-one :baseline "low")]))))
+(assert (not based?) "a :baseline that is not a number is refused")
+
 # ── Type errors ───────────────────────────────────────────────────────
 
 (def [ok1? _] (protect (plt:line "not an array")))
