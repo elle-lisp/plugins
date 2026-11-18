@@ -43,6 +43,20 @@ move them to elle's `target/release/` or point elle at them:
 elle --path=/path/to/plugins/target/release
 ```
 
+### Reclaiming disk
+
+```bash
+make space
+```
+
+This deletes cargo's intermediate files from the directory the Makefile
+builds into: `deps/`, `build/`, `incremental/`, `.fingerprint/` and
+`examples/` under each of `debug/`, `release/` and `ci/`. The built `.so`
+files stay where elle loads them. The directory is elle's `target/` when this
+repo is a submodule, and this repo's `target/` when it stands alone. Pass
+`TARGET_ROOT=dir` to prune another directory. The next build compiles every
+dependency again.
+
 ## Plugins
 
 | Plugin | Description |
