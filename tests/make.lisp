@@ -4,11 +4,16 @@
 ##
 ## `make space` reclaims disk the way elle's own target does: it deletes
 ## cargo's intermediate files from the directory the plugins build into,
-## and keeps what was built. Run from the repository root, as CI runs
-## every test.
+## and keeps what was built.
+##
+## Every make runs in this repository's root, wherever the test runs from.
+## Elle runs the corpus from its own root, where a bare `make` reads elle's
+## Makefile, which has no `portable` target and no `space`.
+
+(def repo (path/parent (path/parent (get (meta/location) :file))))
 
 (defn make [args]
-  (subprocess/system "make" args))
+  (subprocess/system "make" (concat ["--no-print-directory" "-C" repo] args)))
 
 (defn words [text]
   (let [found @[]]
@@ -22,7 +27,7 @@
 ## ── the directory the build writes is the directory space prunes ──
 
 (def build-root
-  (if (path/exists? "../elle-plugin/Cargo.toml") "../target" "target"))
+  (if (path/exists? (path/join repo "../elle-plugin/Cargo.toml")) "../target" "target"))
 
 (def portable (make ["-n" "portable"]))
 (assert (= (get portable :exit) 0) "a dry run of the portable build succeeds")
