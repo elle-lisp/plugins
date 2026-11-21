@@ -37,6 +37,7 @@ jobs:
           - syn
           - tls
           - toml
+          - tokens
           - tree-sitter
           - vulkan
           - wayland

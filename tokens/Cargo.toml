@@ -1,0 +1,11 @@
+[package]
+name = "elle-tokens"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle-plugin = { path = "../../elle-plugin" }
+tiktoken-rs = "0.12"
