@@ -81,6 +81,7 @@ dependency again.
 | `elle-syn` | Rust source parsing |
 | `elle-tls` | TLS client/server (rustls) |
 | `elle-toml` | TOML parsing |
+| `elle-tokens` | Text counted, encoded and decoded in BPE tokens (tiktoken) |
 | `elle-tree-sitter` | Multi-language parsing |
 | `elle-vulkan` | Vulkan GPU compute |
 | `elle-wayland` | Wayland compositor interaction |

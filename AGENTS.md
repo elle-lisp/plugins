@@ -89,6 +89,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | `syn/` | Rust syntax parsing |
 | `tls/` | TLS client and server via rustls |
 | `toml/` | TOML parsing and serialization |
+| `tokens/` | Text counted, encoded and decoded in BPE tokens (tiktoken) |
 | `tree-sitter/` | Multi-language parsing |
 | `vulkan/` | Vulkan GPU compute |
 | `wayland/` | Wayland compositor interaction |
@@ -138,6 +139,7 @@ elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 | `syn/` | Rust parsing |
 | `tls/` | TLS |
 | `toml/` | TOML |
+| `tokens/` | BPE tokens |
 | `tree-sitter/` | Multi-language parsing |
 | `vulkan/` | GPU compute |
 | `wayland/` | Wayland compositor |
